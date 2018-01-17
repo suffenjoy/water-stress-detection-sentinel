@@ -1,0 +1,63 @@
+---
+title: "Roop 2016 Sentinel process"
+author: "Zhehan Tang"
+date: "January 16, 2018"
+output: html_document
+---
+
+#package preparation 
+```{r}
+library(dplyr)
+
+```
+
+#general function to read swp data 
+```{r}
+read_swp <- function(path, swp_file){
+  #read the file
+  swp <- read.csv(file.path(path, swp_file), header = TRUE)
+  
+  #process 
+  library(dplyr)
+  #SELECT columns
+  swp <- dplyr::select(swp, Measure.ment.Date, Rep, Irrigation.Treatment.Code, Tree.., Orchard.SWP........bars.,Bars.Below.Base.Line)
+  #change the colname of the dataframe
+  colnames(swp) <- c("date", "rep", "irrigation", "tree", "swp", "swp.bs")
+  #change the date format
+  swp$date <- as.Date(swp$date, format = "%m/%d/%Y")
+  
+  #change the name of irrigation 
+  swp$irrigation <- gsub(swp$irrigation, pattern = " ", replacement = "_")
+  swp$irrigation <- gsub(swp$irrigation, pattern = "Grower_Practice", replacement = "0_bar_below")
+  
+  #add a new column of indiviudal tree
+  swp$ID <- paste(swp$irrigation,"Rep", swp$rep, "Tree", swp$tree, sep = "_")
+  
+  #change the class of each column
+  swp$rep <- as.factor(swp$rep)
+  swp$irrigation <- as.factor(swp$irrigation)
+  swp$tree <- as.factor(swp$tree)
+  swp$ID <- as.factor(swp$ID)
+  
+  #change the order of the data frame, making ID at the beginging
+  swp <- swp %>% dplyr::select(ID, everything())
+  
+  #output
+  return(swp)
+}
+```
+
+#read 2016 swp data
+```{r}
+swp_roop_2016 <- read_swp(path = "G:/CITRIS Project/Walnut_SWP/2016 Roop walnut swp data", 
+                          swp_file = "2016 walnut swp.csv")
+swp_roop_2017 <- read_swp(path = "G:/CITRIS Project/Walnut_SWP/2017 Roop walnut swp data", 
+                          swp_file = "20171013 walnut swp.csv")
+
+#look at the dates 
+unique(swp_roop_2016$date)
+unique(swp_roop_2017$date)
+
+
+```
+
