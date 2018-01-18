@@ -1,0 +1,24 @@
+---
+title: "C1 Sentinel process"
+author: "Zhehan Tang"
+date: "January 17, 2018"
+output: html_document
+---
+
+#package preparation
+```{r}
+library(dplyr)
+library(raster)
+```
+
+#read swp file
+```{r}
+path_swp <- "G:/CITRIS Project/Walnut_SWP"
+swp_c1_2016 <- read.csv(file.path(path_swp, "2016 C1 walnut swp.csv"), header = TRUE)
+swp_c1_2017 <- read.csv(file.path(path_swp, "2017 C1 walnut swp.csv"), header = TRUE)
+
+#change date format
+swp_c1_2016$Date <- as.Date.character(swp_c1_2016$Date, format = "%d-%b-%y")
+swp_c1_2017$Date <- as.Date.character(swp_c1_2017$Date, format = "%d-%b-%y")
+```
+

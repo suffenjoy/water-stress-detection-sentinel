@@ -1,0 +1,30 @@
+---
+title: "5th Sentinel process"
+author: "Zhehan Tang"
+date: "January 17, 2018"
+output: html_document
+---
+
+#package preparation
+```{r}
+library(dplyr)
+library(raster)
+```
+
+#read swp data
+```{r}
+path_swp <- "G:/CITRIS Project/Walnut_SWP"
+
+swp_5theast_2016 <- na.omit(read.csv(file.path(path_swp, "2016 5th east walnut swp.csv"),header = TRUE)[,c(1,3,4,5)])
+swp_5theast_2017 <- na.omit(read.csv(file.path(path_swp, "2017 5th east walnut swp.csv"),header = TRUE)[,c(1,3,4,5)])
+swp_5thwest_2016 <- na.omit(read.csv(file.path(path_swp, "2016 5th west walnut swp.csv"),header = TRUE)[,c(1,3,4,5)])
+swp_5thwest_2017 <- na.omit(read.csv(file.path(path_swp, "2017 5th west walnut swp.csv"),header = TRUE)[,c(1,3,4,5)])
+
+#change date format
+swp_5theast_2016$Date <- as.Date.character(swp_5theast_2016$Date, format = "%d-%b-%y")
+swp_5theast_2017$Date <- as.Date.character(swp_5theast_2017$Date, format = "%d-%b-%y")
+swp_5thwest_2016$Date <- as.Date.character(swp_5thwest_2016$Date, format = "%d-%b-%y")
+swp_5thwest_2017$Date <- as.Date.character(swp_5thwest_2017$Date, format = "%d-%b-%y")
+
+```
+
