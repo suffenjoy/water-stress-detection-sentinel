@@ -22,3 +22,10 @@ swp_c1_2016$Date <- as.Date.character(swp_c1_2016$Date, format = "%d-%b-%y")
 swp_c1_2017$Date <- as.Date.character(swp_c1_2017$Date, format = "%d-%b-%y")
 ```
 
+#distribution of swp
+```{r}
+par(mfrow=c(1,2))
+hist(swp_c1_2016$Avg)
+hist(swp_c1_2017$Avg)
+```
+

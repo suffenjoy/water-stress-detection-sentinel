@@ -49,10 +49,10 @@ read_swp <- function(path, swp_file){
 
 #read 2016 swp data
 ```{r}
-swp_roop_2016 <- read_swp(path = "G:/CITRIS Project/Walnut_SWP/2016 Roop walnut swp data", 
-                          swp_file = "2016 walnut swp.csv")
-swp_roop_2017 <- read_swp(path = "G:/CITRIS Project/Walnut_SWP/2017 Roop walnut swp data", 
-                          swp_file = "20171013 walnut swp.csv")
+swp_roop_2016 <- read_swp(path = "G:/CITRIS Project/Walnut_SWP", 
+                          swp_file = "2016 Roop walnut swp.csv")
+swp_roop_2017 <- read_swp(path = "G:/CITRIS Project/Walnut_SWP", 
+                          swp_file = "2017 Roop walnut swp.csv")
 
 #look at the dates 
 unique(swp_roop_2016$date)
