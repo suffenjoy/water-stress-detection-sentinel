@@ -1,0 +1,465 @@
+---
+title: "sentinel model building with match dates"
+author: "Zhehan"
+date: "November 16, 2017"
+output: html_document
+---
+```{r}
+library(leaps)
+library(caret)
+library(car)
+library(MASS)
+```
+
+
+#read csv
+```{r}
+path_wal_sen <- "C:/Users/tangz/Box Sync/Zhehan/sentinel water stress detection/sentinel with match dates"
+
+ws_cb_df <- read.csv(file.path(path_wal_sen,"ws_cb_df.csv"), header=TRUE)
+ws_cs_df <- read.csv(file.path(path_wal_sen,"ws_cs_df.csv"), header=TRUE)
+
+#change the type of some columns 
+ws_cs_df$irrigation <- as.factor(ws_cs_df$irrigation)
+ws_cs_df$ID <- as.factor(ws_cs_df$ID)
+ws_cs_df$rep <- as.factor(ws_cs_df$rep)
+ws_cs_df$date <- as.factor(ws_cs_df$date)
+
+ws_cb_df$irrigation <- as.factor(ws_cb_df$irrigation)
+ws_cb_df$ID <- as.factor(ws_cb_df$ID)
+ws_cb_df$rep <- as.factor(ws_cb_df$rep)
+ws_cb_df$date <- as.factor(ws_cb_df$date)
+
+dim(ws_cs_df)
+str(ws_cs_df)
+#produce a data frame that contains only numeric data
+ws_cs_df_num <- select_if(ws_cs_df, is.numeric)
+ws_cb_df_num <- select_if(ws_cb_df, is.numeric)
+```
+
+#the function to classify swp to 4 groups 
+```{r}
+
+swp.max = max(ws_cs_df$swp)
+swp.min = min(ws_cs_df$swp)
+swp.max
+swp.min
+swp_classification <- function(swp){
+  swp_class <- cut(swp, breaks = c(swp.max, -4, -6, -8, -14),  labels = 4:1)
+  return(swp_class)
+}
+
+swp_classification.2 <- function(swp){
+  swp_class <- cut(swp, breaks = c(swp.max, -4, -6, -14), labels = 3:1)
+  return(swp_class)
+}
+
+```
+
+##filter one: correlation with swp
+```{r}
+#p-value of correlation with swp
+p_cs <- apply(ws_cs_df[,c(3:55,61,62)],2,function(x) anova(lm(ws_cs_df$swp~x))$`Pr(>F)`[1])
+#r-square of correlation with swp
+r_cs <- apply(ws_cs_df[,c(3:55,61,62)],2,function(x) summary(lm(ws_cs_df$swp~x))$r.squared)
+
+
+#p-value of correlation with swp.bs
+p_cs.bs <- apply(ws_cs_df[,c(3:55,61,62)],2,function(x) anova(lm(ws_cs_df$swp.bs~x))$`Pr(>F)`[1])
+#r-square of correlation with swp.bs
+r_cs.bs <- apply(ws_cs_df[,c(3:55,61,62)],2,function(x) summary(lm(ws_cs_df$swp.bs~x))$r.squared)
+
+#apply this filter
+X_cs_filter1 <- ws_cs_df[,c(3:55,61,62)][,which(p_cs < 0.05)]
+dim(ws_cs_df)
+dim(X_cs_filter1)
+
+p_cb <- apply(ws_cb_df[,c(3:55,61,62)],2,function(x) anova(lm(ws_cb_df$swp~x))$`Pr(>F)`[1])
+r_cb <- apply(ws_cb_df[,c(3:55,61,62)],2,function(x) summary(lm(ws_cb_df$swp~x))$r.squared)
+#apply this filter
+X_cb_filter1 <- ws_cb_df[,c(3:55,61,62)][,which(p_cb < 0.05)]
+dim(ws_cb_df)
+dim(X_cb_filter1)
+
+
+```
+
+#rfe feature selection: backward selection 
+```{r}
+#set control, 3 repeat 10 cross validation 
+set.seed(777)
+rfecontrol_walsen <- rfeControl(functions = rfFuncs, method = "repeatedcv", number = 10, repeats = 3)
+rfesubsets <- c(4,6,8,10,15,20,25,30,35,40,45,50,55)
+#center simple
+rfe_ws_cs_swp <- rfe(x =  ws_cs_df[,c(3:56, 61, 62)], y = ws_cs_df$swp, rfeControl = rfecontrol_walsen, sizes = rfesubsets,metric = 'Rsquared')
+#center bilinear
+rfe_ws_cb_swp <- rfe(x =  ws_cb_df[,c(3:56, 61, 62)], y = ws_cb_df$swp, rfeControl = rfecontrol_walsen, sizes = rfesubsets,metric = 'Rsquared')
+#use baseline swp, center simple
+rfe_ws_cs_swpbs <- rfe(x =  ws_cs_df[,c(3:56, 61, 62)], y = ws_cs_df$swp.bs, rfeControl = rfecontrol_walsen,sizes = rfesubsets, metric = 'Rsquared')
+#use baseline swp, center bilinear
+rfe_ws_cb_swpbs <- rfe(x =  ws_cb_df[,c(3:56, 61, 62)], y = ws_cb_df$swp.bs, rfeControl = rfecontrol_walsen,sizes = rfesubsets, metric = 'Rsquared')
+
+#check the results
+rfe_ws_cs_swp
+predictors(rfe_ws_cs_swp)
+rfe_ws_cb_swp
+predictors(rfe_ws_cb_swp)
+rfe_ws_cs_swpbs
+predictors(rfe_ws_cs_swpbs)
+rfe_ws_cb_swpbs
+predictors(rfe_ws_cb_swpbs)
+
+par(mfrow = c(2,2))
+plot(rfe_ws_cs_swp, type = 'b', main = "SWP center simple", ylim = c(0.25,0.5))
+plot(rfe_ws_cb_swp, type = 'b', main = "SWP center bilinear", ylim = c(0.25,0.5))
+plot(rfe_ws_cs_swpbs, type = 'b', main = "SWP.bs center simple", ylim = c(0.25,0.5))
+plot(rfe_ws_cb_swpbs, type = 'b', main = "SWP.bs center bilinear", ylim = c(0.25,0.5))
+#rfe_cs_new <- rfe(x = X_cs_new_filter1, y=df_cs_new$swp, rfeControl = rfecontrol_cs_new)
+```
+
+
+##multiple linear regression with all data
+```{r}
+mlr_full_cs <- lm(ws_cs_df$swp~., data=ws_cs_df[,2:55])
+mlr_full_cb <- lm(ws_cb_df$swp~., data=ws_cb_df[,2:55])
+
+summary(mlr_full_cs)
+summary(mlr_full_cb)
+plot(mlr_full_cs)
+vif(mlr_full_cs)
+
+#regfit_cs <- regsubsets(y=ws_cs_df$swp,x=ws_cs_df[,c(3:55, 61, 62)], nvmax = 7, method="backward", really.big = TRUE)
+#regfit_cb <- regsubsets(y=ws_cb_df$swp,x=X_cb_filter1, nvmax = 10,method="backward")
+```
+
+#10 fold validation, set training and testing data set
+```{r}
+set.seed(777)
+#cross validatoin
+fitControl <- trainControl(method = 'repeatedcv', number = 10, repeats = 3)
+#training data and testing data
+#train_test_split <- createDataPartition(swp_classification(ws_cs_df$swp),p=0.7,list=FALSE)
+#cs_train <- ws_cs_df[train_test_split, ]
+#cs_test <- ws_cs_df[-train_test_split,]
+#cb_train <- ws_cb_df[train_test_split,]
+#cb_test <- ws_cb_df[-train_test_split,]
+```
+
+##linear regression 
+```{r}
+slr_cs.scale <- train(swp~., data=ws_cs_df[,c(3:56,59, 61, 62)], method='lm', trControl=fitControl,preProc = c('scale','center'))
+slr_cs <- train(swp~., data=ws_cs_df[,c(3:56,59, 61, 62)], method='lm', trControl=fitControl)
+
+slr_cs.pred <- predict(slr_cs, cs_test[,c(2:55)])
+
+slr_cb <- train(swp~., data=cb_train[,c(2:56,59)], method='lm', trControl=fitControl,preProc = c('scale','center'))
+slr_cb.pred <- predict(slr_cb, cb_test[,c(2:55)])
+
+slr_cs_swpbs <- train(swp.bs~., data=cs_train[,c(2:55,60)], method='lm', trControl=fitControl,preProc = c('scale','center'))
+slr_cs_swpbs.pred <- predict(slr_cs_swpbs, cs_test[,c(2:55)])
+
+slr_cb_swpbs <- train(swp.bs~., data=cb_train[,c(2:55,60)], method='lm', trControl=fitControl,preProc = c('scale','center'))
+slr_cb_swpbs.pred <- predict(slr_cb_swpbs, cb_test[,c(2:55)])
+
+mean((slr_cs.pred-cs_test$swp)^2)
+summary(lm(slr_cs.pred~cs_test$swp))$r.squared
+
+mean((slr_cb.pred-cb_test$swp)^2)
+summary(lm(slr_cb.pred~cb_test$swp))$r.squared
+
+mean((slr_cs_swpbs.pred-cs_test$swp.bs)^2)
+summary(lm(slr_cs_swpbs.pred~cs_test$swp.bs))$r.squared
+
+mean((slr_cb_swpbs.pred-cb_test$swp.bs)^2)
+summary(lm(slr_cb_swpbs.pred~cb_test$swp))$r.squared
+
+par(mfrow=c(2,2))
+plot(slr_cs.pred, cs_test$swp, xlab = 'predicted swp', ylab="observed swp", main="SLR CS SWP", xlim = c(-10,2))
+plot(slr_cb.pred, cb_test$swp, xlab = 'predicted swp', ylab="observed swp", main="SLR CB SWP", xlim = c(-10,2))
+plot(slr_cs_swpbs.pred, cs_test$swp.bs, xlab = 'predicted swp.bs', ylab="observed swp", main="SLR CS SWP.BS", xlim = c(-6,6))
+plot(slr_cb_swpbs.pred, cb_test$swp.bs, xlab = 'predicted swp', ylab="observed swp", main="SLR CS SWP.BS", xlim = c(-6,6))
+```
+
+
+
+##ridge regression
+```{r}
+#tune parameters 
+lambdaGrid <- expand.grid(lambda = 10^seq(3,-3,length=100))
+
+#ridge regression for cs
+ridge_cs <- train(swp~., data=ws_cs_df[,c(3:56,59,61,62)], method='ridge',trControl=fitControl, tuneGrid = lambdaGrid, preProcess = c('center','scale'))
+ridge_cs$bestTune
+predict(ridge_cs$finalModel, type='coef', mode="norm")$coefficients[10,]
+#ridge_cs.pred <- predict(ridge_cs, cs_test[,c(2:55)])
+#sqrt(mean(ridge_cs.pred-cs_test$swp)^2)
+#summary(lm(ridge_cs.pred~cs_test$swp))$r.squared
+
+
+#ridge regression for cb
+ridge_cb <- train(swp~., data=ws_cb_df[,c(3:56,59,61,62)], method='ridge',trControl=fitControl, tuneGrid = lambdaGrid, preProcess = c('center','scale'))
+ridge_cb$bestTune
+predict(ridge_cb$finalModel, type='coef', mode="norm")$coefficients[10,]
+#ridge_cb.pred <- predict(ridge_cb, cb_test[,c(2:55)])
+#sqrt(mean(ridge_cb.pred-cb_test$swp)^2)
+#summary(lm(ridge_cb.pred~cb_test$swp))$r.squared
+
+
+#ridge regression for cs swpbs
+ridge_cs_swpbs <- train(swp.bs~., data=ws_cs_df[,c(3:56,60,61,62)], method='ridge',trControl=fitControl, tuneGrid = lambdaGrid, preProcess = c('center','scale'))
+ridge_cs_swpbs$bestTune
+predict(ridge_cs_swpbs$finalModel, type='coef', mode="norm")$coefficients[10,]
+#ridge_cs_swpbs.pred <- predict(ridge_cs_swpbs, cs_test[,c(2:55)])
+#sqrt(mean(ridge_cs_swpbs.pred-cs_test$swp.bs)^2)
+#summary(lm(ridge_cs_swpbs.pred~cs_test$swp.bs))$r.squared
+
+#ridge regression for cb swpbs
+ridge_cb_swpbs <- train(swp.bs~., data=ws_cb_df[,c(3:56,60,61,62)], method='ridge',trControl=fitControl, tuneGrid = lambdaGrid, preProcess = c('center','scale'))
+ridge_cb_swpbs$bestTune
+predict(ridge_cb_swpbs$finalModel, type='coef', mode="norm")$coefficients[10,]
+#ridge_cb_swpbs.pred <- predict(ridge_cb_swpbs, cs_test[,c(2:55)])
+#sqrt(mean(ridge_cb_swpbs.pred-cb_test$swp.bs)^2)
+#summary(lm(ridge_cb_swpbs.pred~cb_test$swp.bs))$r.squared
+
+
+#mean((ridge_cs.pred-cs_test$swp)^2)
+#summary(lm(ridge_cs.pred~cs_test$swp))$r.squared
+
+#mean((ridge_cb.pred-cb_test$swp)^2)
+#summary(lm(ridge_cb.pred~cb_test$swp))$r.squared
+
+#mean((ridge_cs_swpbs.pred-cs_test$swp.bs)^2)
+#summary(lm(ridge_cs_swpbs.pred~cs_test$swp.bs))$r.squared
+
+#mean((ridge_cb_swpbs.pred-cb_test$swp.bs)^2)
+#summary(lm(ridge_cb_swpbs.pred~cb_test$swp))$r.squared
+
+#par(mfrow=c(2,2))
+#plot(ridge_cs.pred, cs_test$swp, xlab = 'predicted swp', ylab="observed swp", main="ridge CS SWP", xlim = c(-8,-2))
+#plot(ridge_cb.pred, cb_test$swp, xlab = 'predicted swp', ylab="observed swp", main="ridge CB SWP", xlim = c(-8,-2))
+#plot(ridge_cs_swpbs.pred, cs_test$swp.bs, xlab = 'predicted swp.bs', ylab="observed swp", main="ridge CS SWP.BS", xlim = c(-4,2))
+#plot(ridge_cb_swpbs.pred, cb_test$swp.bs, xlab = 'predicted swp', ylab="observed swp", main="ridge CS SWP.BS", xlim = c(-4,2))
+```
+
+#lasso regression
+```{r}
+#tune parameters 
+#lambdaGrid <- expand.grid(lambda = 10^seq(3,-3,length=100))
+
+#lasso regression for cs
+lasso_cs <- train(swp~., data=ws_cs_df[,c(3:56,59,61,62)], method='lasso',trControl=fitControl, tuneLength=10, preProcess = c('center','scale'))
+#lasso_cs.pred <- predict(lasso_cs, cs_test[,c(2:55)])
+#sqrt(mean(lasso_cs.pred-cs_test$swp)^2)
+#summary(lm(lasso_cs.pred~cs_test$swp))$r.squared
+
+
+#lasso regression for cb
+lasso_cb <- train(swp~., data=ws_cb_df[,c(3:56,59,61,62)], method='lasso',trControl=fitControl, tuneLength=10, preProcess = c('center','scale'))
+#lasso_cb.pred <- predict(lasso_cb, cb_test[,c(2:55)])
+#sqrt(mean(lasso_cb.pred-cb_test$swp)^2)
+#summary(lm(lasso_cb.pred~cb_test$swp))$r.squared
+
+
+#lasso regression for cs
+lasso_cs_swpbs <- train(swp.bs~., data=ws_cs_df[,c(3:56,60,61,62)], method='lasso',trControl=fitControl, tuneLength=10, preProcess = c('center','scale'))
+#lasso_cs_swpbs.pred <- predict(lasso_cs_swpbs, cs_test[,c(2:55)])
+#sqrt(mean(lasso_cs_swpbs.pred-cs_test$swp.bs)^2)
+#summary(lm(lasso_cs_swpbs.pred~cs_test$swp.bs))$r.squared
+
+#lasso regression for cb
+lasso_cb_swpbs <- train(swp.bs~., data=ws_cb_df[,c(3:56,60,61,62)], method='lasso',trControl=fitControl, tuneLength=10, preProcess = c('center','scale'))
+#lasso_cb_swpbs.pred <- predict(lasso_cb_swpbs, cs_test[,c(2:55)])
+#sqrt(mean(lasso_cb_swpbs.pred-cb_test$swp.bs)^2)
+#summary(lm(lasso_cb_swpbs.pred~cb_test$swp.bs))$r.squared
+
+
+#mean((lasso_cs.pred-cs_test$swp)^2)
+#summary(lm(lasso_cs.pred~cs_test$swp))$r.squared
+
+#mean((lasso_cb.pred-cb_test$swp)^2)
+#summary(lm(lasso_cb.pred~cb_test$swp))$r.squared
+
+#mean((lasso_cs_swpbs.pred-cs_test$swp.bs)^2)
+#summary(lm(lasso_cs_swpbs.pred~cs_test$swp.bs))$r.squared
+
+#mean((lasso_cb_swpbs.pred-cb_test$swp.bs)^2)
+#summary(lm(lasso_cb_swpbs.pred~cb_test$swp))$r.squared
+
+#par(mfrow=c(2,2))
+#plot(lasso_cs.pred, cs_test$swp, xlab = 'predicted swp', ylab="observed swp", main="lasso CS SWP", xlim = c(-8,-2))
+#plot(lasso_cb.pred, cb_test$swp, xlab = 'predicted swp', ylab="observed swp", main="lasso CB SWP", xlim = c(-8,-2))
+#plot(lasso_cs_swpbs.pred, cs_test$swp.bs, xlab = 'predicted swp.bs', ylab="observed swp", main="lasso CS SWP.BS", xlim = c(-4,2))
+#plot(lasso_cb_swpbs.pred, cb_test$swp.bs, xlab = 'predicted swp', ylab="observed swp", main="lasso CS SWP.BS", xlim = c(-4,2))
+
+lasso_cs$bestTune
+lasso_cb$bestTune
+lasso_cs_swpbs$bestTune
+lasso_cb_swpbs$bestTune
+
+lasso_cs
+predict(lasso_cs$finalModel, type='coef', mode="norm")$coefficients[10,]
+
+lasso_cb
+predict(lasso_cb$finalModel, type='coef', mode="norm")$coefficients[10,]
+
+lasso_cs_swpbs
+predict(lasso_cs_swpbs$finalModel, type='coef', mode="norm")$coefficients[10,]
+
+lasso_cb_swpbs
+predict(lasso_cb_swpbs$finalModel, type='coef', mode="norm")$coefficients[10,]
+
+```
+
+##PCR: principle components regression
+```{r}
+#pcr regression for cs
+pcr_cs <- train(swp~., data=cs_train[,c(2:55,59)], method='pcr',trControl=fitControl, preProcess = c('center','scale'))
+pcr_cs.pred <- predict(pcr_cs, cs_test[,c(2:55)])
+sqrt(mean(pcr_cs.pred-cs_test$swp)^2)
+summary(lm(pcr_cs.pred~cs_test$swp))$r.squared
+
+
+#pcr regression for cb
+pcr_cb <- train(swp~., data=cb_train[,c(2:55,59)], method='pcr',trControl=fitControl, preProcess = c('center','scale'))
+pcr_cb.pred <- predict(pcr_cb, cb_test[,c(2:55)])
+sqrt(mean(pcr_cb.pred-cb_test$swp)^2)
+summary(lm(pcr_cb.pred~cb_test$swp))$r.squared
+
+
+#pcr regression for cs
+pcr_cs_swpbs <- train(swp.bs~., data=cs_train[,c(2:55,60)], method='pcr',trControl=fitControl, preProcess = c('center','scale'))
+pcr_cs_swpbs.pred <- predict(pcr_cs_swpbs, cs_test[,c(2:55)])
+sqrt(mean(pcr_cs_swpbs.pred-cs_test$swp.bs)^2)
+summary(lm(pcr_cs_swpbs.pred~cs_test$swp.bs))$r.squared
+
+#pcr regression for cb
+pcr_cb_swpbs <- train(swp.bs~., data=cb_train[,c(2:55,60)], method='pcr',trControl=fitControl,  preProcess = c('center','scale'))
+pcr_cb_swpbs.pred <- predict(pcr_cb_swpbs, cs_test[,c(2:55)])
+sqrt(mean(pcr_cb_swpbs.pred-cb_test$swp.bs)^2)
+summary(lm(pcr_cb_swpbs.pred~cb_test$swp.bs))$r.squared
+
+
+mean((pcr_cs.pred-cs_test$swp)^2)
+summary(lm(pcr_cs.pred~cs_test$swp))$r.squared
+
+mean((pcr_cb.pred-cb_test$swp)^2)
+summary(lm(pcr_cb.pred~cb_test$swp))$r.squared
+
+mean((pcr_cs_swpbs.pred-cs_test$swp.bs)^2)
+summary(lm(pcr_cs_swpbs.pred~cs_test$swp.bs))$r.squared
+
+mean((pcr_cb_swpbs.pred-cb_test$swp.bs)^2)
+summary(lm(pcr_cb_swpbs.pred~cb_test$swp))$r.squared
+
+par(mfrow=c(2,2))
+plot(pcr_cs.pred, cs_test$swp, xlab = 'predicted swp', ylab="observed swp", main="pcr CS SWP", xlim = c(-7,-4))
+plot(pcr_cb.pred, cb_test$swp, xlab = 'predicted swp', ylab="observed swp", main="pcr CB SWP", xlim = c(-7,-4))
+plot(pcr_cs_swpbs.pred, cs_test$swp.bs, xlab = 'predicted swp.bs', ylab="observed swp", main="pcr CS SWP.BS", xlim = c(-2,1))
+plot(pcr_cb_swpbs.pred, cb_test$swp.bs, xlab = 'predicted swp', ylab="observed swp", main="pcr CS SWP.BS", xlim = c(-2,1))
+
+```
+```{r}
+```
+
+
+
+##PLS: partial least squares
+```{r}
+#pls regression for cs
+pls_cs <- plsr(swp~., data=cs_train[,c(2:55,59)],scale=TRUE, validation ="CV")
+#pls_cs <- train(swp~., data=cs_train[,c(2:55,59)], method='pls',trControl=fitControl, tuneLength=5, preProcess = c('center','scale'))
+validationplot(pls_cs, val.type = 'MSEP')
+pls_cs.pred <- predict(pls_cs, cs_test[,c(2:55)])
+sqrt(mean(pls_cs.pred-cs_test$swp)^2)
+summary(lm(pls_cs.pred~cs_test$swp))$r.squared
+
+
+#pls regression for cb
+pls_cb <- plsr(swp~., data=cb_train[,c(2:55,59)],scale=TRUE, validation ="CV")
+#pls_cb <- train(swp~., data=cb_train[,c(2:55,59)], method='pls',trControl=fitControl, tuneLength=5, preProcess = c('center','scale'))
+pls_cb.pred <- predict(pls_cb, cb_test[,c(2:55)])
+sqrt(mean(pls_cb.pred-cb_test$swp)^2)
+summary(lm(pls_cb.pred~cb_test$swp))$r.squared
+
+
+#pls regression for cs
+pls_cs_swpbs <- plsr(swp.bs~., data=cs_train[,c(2:55,60)],scale=TRUE, validation ="CV")
+#pls_cs_swpbs <- train(swp.bs~., data=cs_train[,c(2:55,60)], method='pls',trControl=fitControl, tuneLength=5, preProcess = c('center','scale'))
+pls_cs_swpbs.pred <- predict(pls_cs_swpbs, cs_test[,c(2:55)])
+sqrt(mean(pls_cs_swpbs.pred-cs_test$swp.bs)^2)
+summary(lm(pls_cs_swpbs.pred~cs_test$swp.bs))$r.squared
+
+#pls regression for cb
+pls_cb_swpbs <- plsr(swp.bs~., data=cb_train[,c(2:55,60)],scale=TRUE, validation="CV")
+#pls_cb_swpbs <- train(swp.bs~., data=cb_train[,c(2:55,60)], method='pls',trControl=fitControl, tuneLength=5, preProcess = c('center','scale'))
+pls_cb_swpbs.pred <- predict(pls_cb_swpbs, cs_test[,c(2:55)])
+sqrt(mean(pls_cb_swpbs.pred-cb_test$swp.bs)^2)
+summary(lm(pls_cb_swpbs.pred~cb_test$swp.bs))$r.squared
+
+```
+
+#random forest regression 
+```{r}
+#train with random forest regression model
+lasso_cs <- train(swp~., data=ws_cs_df[,c(3:56,59,61,62)], method='lasso',trControl=fitControl, tuneLength=10, preProcess = c('center','scale'))
+
+#fit the model
+rf_ws_cs <- train(x = ws_cs_df[,c(3:56,61,62)], y=ws_cs_df$swp, method = "rf", trControl = fitControl, tuneLength = 10, preProcess = c('center','scale'), importance = TRUE)
+rf_ws_cb <- train(x = ws_cb_df[,c(3:56,61,62)], y=ws_cb_df$swp, method = "rf", trControl = fitControl, tuneLength = 10, preProcess = c('center','scale'), importance = TRUE)
+rf_ws_cs_swpbs <- train(x = ws_cs_df[,c(3:56,61,62)], y=ws_cs_df$swp.bs, method = "rf", trControl = fitControl, tuneLength = 10, preProcess = c('center','scale'), importance = TRUE)
+rf_ws_cb_swpbs <- train(x = ws_cs_df[,c(3:56,61,62)], y=ws_cb_df$swp.bs, method = "rf", trControl = fitControl, tuneLength = 10, preProcess = c('center','scale'), importance = TRUE)
+
+#importance
+rf_ws_cs
+varImp(rf_ws_cs)
+
+rf_ws_cb
+varImp(rf_ws_cb)
+
+rf_ws_cs_swpbs
+varImp(rf_ws_cs_swpbs)
+
+rf_ws_cb_swpbs
+varImp(rf_ws_cb_swpbs)
+
+```
+
+
+#random forest classification
+```{r}
+set.seed(777)
+rf.class_ws_cs <- train(x = ws_cs_df[,c(3:56,61,62)], y=swp_classification(ws_cs_df$swp), method = "rf", preProcess = c("center","scale"), trControl = fitControl, importance = TRUE)
+
+rf.class_ws_cb <- train(x = ws_cb_df[,c(3:56,61,62)], y=swp_classification(ws_cb_df$swp), method = "rf", preProcess = c("center","scale"), trControl = fitControl, importance = TRUE)
+
+rf.class2_ws_cs <- train(x = ws_cs_df[,c(3:56,61,62)], y=swp_classification.2(ws_cs_df$swp), method = "rf", preProcess = c("center","scale"), trControl = fitControl, importance = TRUE)
+
+rf.class2_ws_cb <- train(x = ws_cb_df[,c(3:56,61,62)], y=swp_classification.2(ws_cb_df$swp), method = "rf", preProcess = c("center","scale"), trControl = fitControl, importance = TRUE)
+
+
+rf.class_ws_cs
+rf.class_ws_cb
+rf.class2_ws_cs
+rf.class2_ws_cb
+varImp(rf.class_ws_cs)
+varImp(rf.class_ws_cb)
+varImp(rf.class2_ws_cs)
+varImp(rf.class2_ws_cb)
+
+confusionMatrix(rf.class_ws_cs)
+confusionMatrix(rf.class_ws_cb)
+confusionMatrix(rf.class2_ws_cs)
+confusionMatrix(rf.class2_ws_cb)
+
+```
+
+#svm classification
+```{r}
+svm.class_ws_cs <-  train(x = ws_cs_df[,c(3:56,61,62)], y=swp_classification(ws_cs_df$swp), method = "svmLinear", preProcess = c("center","scale"), trControl = fitControl, importance = TRUE)
+
+svm.class2_ws_cs <-  train(x = ws_cs_df[,c(3:56,61,62)], y=swp_classification.2(ws_cs_df$swp), method = "svmLinear", preProcess = c("center","scale"), trControl = fitControl, importance = TRUE)
+
+varImp(svm.class_ws_cs)
+
+```
+
