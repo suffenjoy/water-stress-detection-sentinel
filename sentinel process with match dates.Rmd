@@ -1,0 +1,750 @@
+---
+title: "sentinel process with match dates"
+author: "Zhehan"
+date: "November 15, 2017"
+output: html_document
+---
+#Package preparation
+```{r}
+library(sp)
+library(raster)
+library(ggplot2)
+library(dplyr)
+library(plyr)
+library(rgeos)
+library(rgdal)
+library(glmnet)
+library(Hmisc)
+library(caret)
+library(klaR)
+library(randomForest)
+library(ROCR)
+library(pROC)
+```
+
+# Read and process swp data
+##Read updated swp data csv
+swp: the dataframe to store raw swp data
+```{r}
+#path_swp <- "D:/CITRIS Project/Walnut_SWP/2017 walnut swp raw data"
+path_swp <- "C:/Users/tangz/Box Sync/Zhehan/sentinel water stress detection"
+swp <- read.csv(file.path(path_swp, "20171013 walnut swp.csv"), header = TRUE)
+#SELECT columns
+swp <- dplyr::select(swp, Measure.ment.Date, Rep, Irrigation.Treatment.Code, Tree.., Orchard.SWP........bars.,Bars.Below.Base.Line)
+#change the colname of the dataframe
+colnames(swp) <- c("date", "rep", "irrigation", "tree", "swp", "swp.bs")
+#change the date format
+swp$date <- as.Date(swp$date, format = "%m/%d/%Y")
+
+#change the name of irrigation 
+swp$irrigation <- gsub(swp$irrigation, pattern = " ", replacement = "_")
+swp$irrigation <- gsub(swp$irrigation, pattern = "Grower_Practice", replacement = "0_bar_below")
+
+#add a new column of indiviudal tree
+swp$ID <- paste(swp$irrigation,"Rep", swp$rep, "Tree", swp$tree, sep = "_")
+
+#change the class of each column
+swp$rep <- as.factor(swp$rep)
+swp$irrigation <- as.factor(swp$irrigation)
+swp$tree <- as.factor(swp$tree)
+swp$ID <- as.factor(swp$ID)
+#change the order of the data frame, making ID at the beginging
+swp <- swp %>% dplyr::select(ID, everything())
+
+head(swp)
+tail(swp)
+
+swp_ID_list <- split(swp, swp$ID)
+```
+
+##Select the match dates
+swp_sen: the data frame that stores the swp of the dates that match sentinel dates
+swp_sen_datelist: split swp_sen into a list based on dates
+```{r}
+swp_sen <- subset(swp,date %in% as.Date(c('2017-06-19', '2017-07-17','2017-07-24','2017-08-18','2017-08-31','2017-09-22'))) 
+dim(swp_sen)
+#split with dates
+swp_sen_datelist <- split(swp_sen, swp_sen$date)
+```
+
+##Calculate block average for swp_sentinel
+swp.ave_sen_datelist: block average swp split into a list based on dates 
+```{r}
+#create an empty list to swp_ave
+swp.ave_sen_datelist <- list()
+for(i in 1:length(swp_sen_datelist)){
+  #aggregate to calculate the average of swp from two trees in th same block
+  swp.ave_sen_datelist[[i]] <- aggregate(x=swp_sen_datelist[[i]][6:7], by = list(date = swp_sen_datelist[[i]]$date, rep=swp_sen_datelist[[i]]$rep, irrigation = swp_sen_datelist[[i]]$irrigation), FUN = mean)
+  #rename the fourth column from "x" to "swp"
+  colnames(swp.ave_sen_datelist[[i]])[4] = "swp"
+  #create a new column called "ID", which is the block name 
+  swp.ave_sen_datelist[[i]]$ID <- paste(swp.ave_sen_datelist[[i]]$irrigation, "Rep", swp.ave_sen_datelist[[i]]$rep, sep = "_")
+  #change the ID column from character to factor
+  swp.ave_sen_datelist[[i]]$ID <- as.factor(swp.ave_sen_datelist[[i]]$ID)
+  #make the ID column come to the front 
+  #swp.ave_sen_datelist[[i]] <- swp.ave_sen_datelist[[i]] %>% dplyr::select(ID, everything())
+
+  #name each sublist
+  names(swp.ave_sen_datelist)[i] <- names(swp_sen_datelist)[i]
+
+}
+
+```
+
+#Function to read sentinel file
+```{r}
+read_sentinel <- function(path, sentinel_image){
+  #sentinel_image is the name of the sentinel file
+
+  #get the brick
+  sentinel <- brick(file.path(path, sentinel_image))
+  
+  #spectral subset for 10 bands
+  require(raster)
+  sentinel <- raster::subset(sentinel, 1:10)
+  
+  #rename the bands 
+  names(sentinel) <- c('blue', 'green', 'red', 'rededge1', 'rededge2', 'rededge3', 'nir', 'rededge4', 'swir1', 'swir2')
+  
+  #output
+  return(sentinel)
+}
+```
+
+
+#Read the sentinel of match dates 
+```{r}
+path_wal_sen <- "C:/Users/tangz/Box Sync/Zhehan/sentinel water stress detection/sentinel with match dates"
+
+wal_sen_20170619 <- read_sentinel(path_wal_sen, "wal_sen_20170619_10m.tif")
+wal_sen_20170717 <- read_sentinel(path_wal_sen, "wal_sen_20170717_10m.tif")
+wal_sen_20170724 <- read_sentinel(path_wal_sen, "wal_sen_20170724_10m.tif")
+wal_sen_20170818 <- read_sentinel(path_wal_sen, "wal_sen_20170818_10m.tif")
+wal_sen_20170831 <- read_sentinel(path_wal_sen, "wal_sen_20170831_10m.tif")
+wal_sen_20170922 <- read_sentinel(path_wal_sen, "wal_sen_20170922_10m.tif")
+
+wal_sen_20170503 <- read_sentinel(path_wal_sen, "wal_sen_20170503_10m.tif")
+wal_sen_20170813 <- read_sentinel(path_wal_sen, "wal_sen_20170813_10m.tif")
+
+wal_sen_list <- list("20170619"=wal_sen_20170619,"20170717"=wal_sen_20170717,"20170724"=wal_sen_20170724,"20170818"=wal_sen_20170818, "20170831"=wal_sen_20170831, "20170922"=wal_sen_20170922)
+```
+
+#Read the boundary shapefile
+wal_field: the big boundary of the whole field
+wal_block: the boundary of each block
+wal_centers:
+```{r}
+path_boundary <- "C:/Users/tangz/Box Sync/Zhehan/sentinel water stress detection/site locations"
+
+#this is the shapefile of the boundary of blocks
+wal_blocks <- shapefile(file.path(path_boundary, "MAP2_blocks.shp"))
+#use '_' to replace ' ' and ','
+wal_blocks$Name <- gsub(x=gsub(x = wal_blocks$Name, replacement = '', pattern = ","),replacement ="_", pattern = " " )
+#change grower's practice to 0_bar_below
+wal_blocks$Name <- gsub(wal_blocks$Name, pattern = "Grower's_practice", replacement = "0_bar_below")
+
+#unify the crs
+wal_blocks <- spTransform(wal_blocks, crs(wal_sen_20170717))
+
+#remove the big boundary
+wal_field <- wal_blocks[wal_blocks$Name == "2014_Tehama_Walnut_Irrigation_Treatment",]
+wal_blocks <- wal_blocks[wal_blocks$Name != "2014_Tehama_Walnut_Irrigation_Treatment",]
+
+
+#----------------------------------------------------#
+
+#this is the shapefile of the poitns 
+wal_points <- shapefile(file.path(path_boundary, "MAP2_points.shp"))
+#use '_' to replace ' ' and ','
+wal_points$Name <- gsub(x=gsub(x = wal_points$Name, replacement = '', pattern = ","),replacement ="_", pattern = " " )
+#change grower's practice to 0_bar_below
+wal_points$Name <- gsub(wal_points$Name, pattern = "Grower's_practice", replacement = "0_bar_below")
+#change "3_bar" to "3_bars"
+wal_points$Name <- gsub(wal_points$Name, pattern = "3_bar_", replacement = "3_bars_")
+#change "4_bar" to "4_bars"
+wal_points$Name <- gsub(wal_points$Name, pattern = "4_bar_", replacement = "4_bars_")
+#remove extra dimension of coordinate system
+wal_points@coords <- wal_points@coords[,1:2]
+#unify the crs
+wal_points <- spTransform(wal_points, crs(wal_sen_20170717))
+
+#-------------------------------------------------------#
+#Add a column of blocks to wal_points
+wal_points$blocks <- sapply(strsplit(wal_points$Name, "_Tree",1),'[',1)
+#split them by blocks so that we can have 
+wal_centers_split <- split(wal_points, wal_points$blocks)
+wal_centers_split <- lapply(wal_centers_split, function(x) SpatialPointsDataFrame(coords = matrix(colMeans(x@coords),1,2), proj4string = x@proj4string, data = data.frame(Name = unique(x$blocks))))
+
+wal_centers <- do.call(rbind,wal_centers_split)
+wal_centers$Name <- as.character(wal_centers$Name)
+
+#-------------------------------------------------------#
+#order it
+wal_blocks <- wal_blocks[order(wal_blocks$Name),]
+wal_centers <- wal_centers[order(wal_centers$Name),]
+wal_points <- wal_points[order(wal_points$Name),]
+
+#-------------------------------------------------------#
+#plot it
+plot(wal_field)
+plot(wal_blocks, add = TRUE )
+plot(wal_centers, add= TRUE, pch = 20, col = 'red')
+plot(wal_points, add = TRUE)
+
+plot(wal_field)
+plot(wal_blocks, add = TRUE)
+plot(wal_blocks[wal_blocks$Name=="4_bars_below_Rep_5",], add = TRUE, col='red')
+plot(wal_blocks[wal_blocks$Name=="4_bars_below_Rep_4",], add = TRUE, col='red')
+```
+
+# The function to extract values of the centers and their 10m buffer
+- Also test two different extract methods: simple and bilinear. If 'simple' values for the cell a point falls in are returned. If 'bilinear' the returned values are interpolated from the values of the four nearest raster cells.
+```{r}
+extract_sen <- function(sentinel_list, locations, method, fun){
+  #sentinel_list: it is the list to store all sentinel rasterbrick
+  #locations: it has 3 options: wal_blocks, wal_centers, wal_points, wal_field
+  #method: it is the method used in the extract function. it has 2 optiosn: 'simple' or 'bilinear'
+  #fun: it is the fun in the extract function, determining how to summarize the values. Usually it's either mean or median
+  #buffer: it is the buffer in the extract function, determining the radius. Don't use when it's MAP2_blocks.  
+  
+  #this is the list to store all the produced data frame for each date
+  extract_sentinel_list <- list()
+  
+  #In the for loop, every sublist stores a data frame extracted from the sentinel image of that date
+  for(i in 1:length(sentinel_list)){
+    extract_sentinel_list[[i]]<- raster::extract(x = sentinel_list[[i]], y = locations, method, fun, df = TRUE, na.rm=TRUE, buffer = NULL)
+    extract_sentinel_list[[i]]$ID <- locations$Name
+  }
+  
+  #give names (corresponding dates) to the list
+  names(extract_sentinel_list) <- names(sentinel_list)
+  return(extract_sentinel_list)
+}
+
+```
+
+#Extract reflectance values of the locations
+```{r}
+WalSen_centers_sim <- extract_sen(wal_sen_list, wal_centers, method='simple', fun=mean)
+WalSen_centers_bil <- extract_sen(wal_sen_list, wal_centers, method='bilinear', fun=mean)
+
+WalSen_points_sim <- extract_sen(wal_sen_list, wal_points, method='simple', fun=mean)
+WalSen_points_bil <- extract_sen(wal_sen_list, wal_points, method='bilinear', fun=mean)
+
+#WalSen_blocks_sim <- extract_sen(wal_sen_list, wal_blocks, method='simple', fun=mean)
+#WalSen_blocks_bil <- extract_sen(wal_sen_list, wal_blocks, method='bilinear', fun=mean)
+
+```
+
+#Vegetation indices functions
+```{r}
+ndvi <- function(sentinel){
+  band_red <- sentinel$red 
+  band_nir <- sentinel$nir
+  ndvi <- (band_nir-band_red)/(band_nir+band_red)
+  return(ndvi)
+}
+grvi1 <- function(sentinel){
+  band_red <- sentinel$red
+  band_green <- sentinel$green
+  grvi1 <- (band_red - band_green)/(band_red + band_green)
+  return(grvi1)
+}
+gndvi <- function(sentinel){
+  band_842 <- sentinel$nir
+  band_560 <- sentinel$green
+  gndvi <- (band_842 - band_560)/(band_842 + band_560)
+  return(gndvi)
+}
+sr <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_red <- sentinel$red
+  sr <- band_nir/band_red
+  return(sr)
+}
+gci <- function(sentinel){
+  band_green <- sentinel$green
+  band_nir <- sentinel$nir
+  gci <- band_nir/band_green
+}
+sr.green <- function(sentinel){
+  band_842 <- sentinel$nir
+  band_560 <- sentinel$green
+  sr.green <- band_842/band_560
+  return(sr.green)
+}
+cvi <- function(sentinel){
+  band_842 <- sentinel$nir
+  band_560 <- sentinel$green
+  band_665 <- sentinel$red
+  cvi <- (band_842/band_560)/(band_560+band_665)
+  return(cvi)
+}
+savi <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_red <- sentinel$red
+  savi <- 1.5*(band_nir-band_red)/(band_nir+band_red+0.5)
+  return(savi)
+}
+psri.nir <- function(sentinel){
+  band_red <- sentinel$red
+  band_blue <- sentinel$blue
+  band_nir <- sentinel$nir
+  psri.nir <- (band_red - band_blue)/(band_nir)
+  return(psri.nir)
+}
+ndvi.green <- function(sentinel){
+  band_green <- sentinel$green
+  band_nir <- sentinel$nir
+  band_red <- sentinel$red
+  ndvi.green <- band_green*(band_nir - band_red)/(band_nir + band_red)
+  return(ndvi.green)
+}
+msavi2 <- function(sentinel){
+  band_red <- sentinel$red 
+  band_nir <- sentinel$nir
+  msavi2 <- (band_nir + 1) - 0.5*sqrt((2*band_nir - 1)^2 + 8*band_red)
+  return(msavi2)
+}
+lai.savi <- function(sentinel){
+  band_red <- sentinel$red 
+  band_nir <- sentinel$nir
+  lai.savi <- -log(0.371 + 1.5*(band_nir - band_red)/(band_nir + band_red + 0.5))/2.4
+  return(lai.savi)
+}
+cri1 <- function(sentinel){
+  band_green <- sentinel$green
+  band_blue <- sentinel$blue
+  cri1 <- (1/band_blue)-(1/band_green)
+  return(cri1)
+}
+arvi <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_red <- sentinel$red
+  band_blue <- sentinel$blue
+  arvi <- (band_nir - (2*band_red - band_blue))/(band_nir + (2*band_red-band_blue))
+  return(arvi)
+}
+ari2 <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_blue <- sentinel$blue
+  band_green <- sentinel$green
+  ari2 <- (band_nir/band_blue)-(band_nir/band_green)
+  return(ari2)
+}
+ndwi <- function(sentinel){
+  band_swir1 <- sentinel$swir1
+  band_nir <- sentinel$nir
+  ndwi <- (band_nir - band_swir1)/(band_swir1 + band_nir)
+  return(ndwi)
+}
+re.ndwi <- function(sentinel){
+  band_rededge1 <- sentinel$rededge1
+  band_green <- sentinel$green
+  re.ndwi <- (band_green-band_rededge1)/(band_green+band_rededge1)
+  return(re.ndwi)
+}
+re.ndvi.1 <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_rededge1 <- sentinel$rededge1
+  re.ndvi.1 <- (band_nir - band_rededge1)/(band_nir + band_rededge1)
+  return(re.ndvi.1)
+}
+re.ndvi.2 <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_rededge2 <- sentinel$rededge2
+  re.ndvi.2 <- (band_nir - band_rededge2)/(band_nir + band_rededge2)
+  return(re.ndvi.2)
+}
+re.ndvi.3 <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_rededge3 <- sentinel$rededge3
+  re.ndvi.3 <- (band_nir - band_rededge3)/(band_nir + band_rededge3)
+  return(re.ndvi.3)
+}
+psri <- function(sentinel){
+  band_red <- sentinel$red
+  band_blue <- sentinel$blue
+  band_rededge1 <- sentinel$rededge1
+  psri <- (band_red - band_blue)/(band_rededge1)
+  return(psri)
+}
+ndre.1 <- function(sentinel){
+  band_705 <- sentinel$rededge1 
+  band_740 <- sentinel$rededge2
+  ndre.1 <- (band_740-band_705)/(band_740+band_705)
+  return(ndre.1)
+}
+ndre.2 <- function(sentinel){
+  band_705 <- sentinel$rededge1 
+  band_783 <- sentinel$rededge3
+  ndre.2 <- (band_783-band_705)/(band_783+band_705)
+  return(ndre.2)
+}
+ndre.3 <- function(sentinel){
+  band_740 <- sentinel$rededge2 
+  band_783 <- sentinel$rededge3
+  ndre.3 <- (band_783-band_740)/(band_783+band_740)
+  return(ndre.3)
+}
+ndi.45 <- function(sentinel){
+  band_red <- sentinel$red 
+  band_rededge1 <- sentinel$rededge1
+  ndi.45 <- (band_rededge1-band_red)/(band_rededge1+band_red)
+  return(ndi.45)
+}
+mtci <- function(sentinel){
+  band_740 <- sentinel$rededge2 
+  band_705 <- sentinel$rededge1
+  band_665 <- sentinel$red
+  mtci <- (band_740-band_705)/(band_705-band_665)
+  return(mtci)
+}
+msi <- function(sentinel){
+  band_swir1 <- sentinel$swir1 
+  band_nir <- sentinel$nir
+  msi <- band_swir1/band_nir
+  return(msi)
+}
+mcari <- function(sentinel){
+  band_rededge1 <- sentinel$rededge1
+  band_red <- sentinel$red
+  band_green <- sentinel$green
+  mcari <- 1-0.2*(band_rededge1 - band_green)/(band_rededge1 - band_red)
+  return(mcari)
+}
+ireci <- function(sentinel){
+  band_rededge3 <- sentinel$rededge3
+  band_red <- sentinel$red
+  band_rededge2 <- sentinel$rededge2
+  band_rededge1 <- sentinel$rededge1
+  ireci <- (band_rededge3 - band_red)*band_rededge2/band_rededge1
+  return(ireci)
+}
+ci.rededge <- function(sentinel){
+  band_783 <- sentinel$rededge3
+  band_705 <- sentinel$rededge1
+  ci.rededge <- band_783/band_705 - 1
+  return(ci.rededge)
+}
+ci.green <- function(sentinel){
+  band_783 <- sentinel$rededge3
+  band_560 <- sentinel$green
+  ci.green <- band_783/band_560 - 1
+  return(ci.green)
+}
+cri2 <- function(sentinel){
+  band_blue <- sentinel$blue
+  band_rededge1 <- sentinel$rededge1
+  cri2 <- (1/band_blue) - (1/band_rededge1)
+  return(cri2)
+}
+chl.rededge.1 <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_rededge1 <- sentinel$rededge1
+  chl.rededge.1 <- band_nir/band_rededge1-1
+  return(chl.rededge.1)
+}
+chl.rededge.2 <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_rededge2 <- sentinel$rededge2
+  chl.rededge.2 <- band_nir/band_rededge2-1
+  return(chl.rededge.2)
+}
+chl.rededge.3 <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_rededge3 <- sentinel$rededge3
+  chl.rededge.3 <- band_nir/band_rededge3-1
+  return(chl.rededge.3)
+}
+ari1 <- function(sentinel){
+  band_rededge1 <- sentinel$rededge1
+  band_green <- sentinel$green
+  ari1 <- (1/band_green)-(1/band_rededge1)
+  return(ari1)
+}
+tcari.osavi <- function(sentinel){
+  band_rededge1 <- sentinel$rededge1
+  band_red <- sentinel$red
+  band_green <- sentinel$green
+  band_nir <- sentinel$nir
+  
+  tcari <- 3*((band_rededge1 - band_red)-0.2*(band_rededge1 - band_green)*band_rededge1/band_red)
+  osavi <- (1+0.16)*(band_nir - band_red)/(band_nir + band_red + 0.16)
+}
+mcari.osavi <- function(sentinel){
+  
+  mcari <- (sentinel$rededge1 - sentinel$red) - 0.2*(sentinel$rededge1 - sentinel$green) * sentinel$rededge1/sentinel$red
+  osavi <- (1+0.16)*(sentinel$nir-sentinel$red)/(sentinel$nir+sentinel$red+0.16)
+  return(mcari/osavi)
+}
+mcari.osavi.705 <- function(sentinel){
+  band_740 <- sentinel$rededge2
+  band_705 <- sentinel$rededge1
+  band_560 <- sentinel$green
+  mcari <- ((band_740-band_705)-0.2*(band_740-band_560))*band_740/band_705
+  osavi <- (1+0.16)*(band_740-band_705)/(band_740 + band_705 + 0.16)
+  return(mcari/osavi)
+}
+tcari.osavi.705 <- function(sentinel){
+  band_740 <- sentinel$rededge2
+  band_705 <- sentinel$rededge1
+  band_560 <- sentinel$green
+  osavi <- (1+0.16)*(band_740-band_705)/(band_740 + band_705 + 0.16)
+  tcari <- 3*((band_740 - band_705) - 0.2*(band_740 - band_560)*band_740/band_705)
+  return(tcari/osavi)
+}
+REP <- function(sentinel){
+  band_705 <- sentinel$rededge1
+  band_665 <- sentinel$red
+  band_740 <- sentinel$rededge2
+  band_783 <- sentinel$rededge3
+  REP <- 705 + 35*((band_665 + band_783)/2-band_705)/(band_740-band_705)
+  return(REP)
+}
+sccci.1 <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_rededge1 <- sentinel$rededge1
+  band_red <- sentinel$red
+  re.ndvi.1 <- (band_nir - band_rededge1)/(band_nir + band_rededge1)
+  ndvi <- (band_nir-band_red)/(band_nir+band_red)
+  return(re.ndvi.1/ndvi)
+}
+sccci.2 <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_rededge2 <- sentinel$rededge2
+  band_red <- sentinel$red
+  re.ndvi.2 <- (band_nir - band_rededge2)/(band_nir + band_rededge2)
+  ndvi <- (band_nir-band_red)/(band_nir+band_red)
+  return(re.ndvi.2/ndvi)
+}
+sccci.3 <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_rededge3 <- sentinel$rededge3
+  band_red <- sentinel$red
+  re.ndvi.3 <- (band_nir - band_rededge3)/(band_nir + band_rededge3)
+  ndvi <- (band_nir-band_red)/(band_nir+band_red)
+  return(re.ndvi.3/ndvi)
+}
+
+```
+
+#NDVI for the entire field overtime
+```{r}
+WalSen_ndvi_list <- lapply(wal_sen_list, ndvi)
+par(mfrow=c(2,3))
+for(i in 1:6){
+  hist(raster::mask(WalSen_ndvi_list[[i]],wal_field), main=paste(names(WalSen_ndvi_list)[i],"NDVI of the field"),xlim=c(0.4,1.0),ylim=c(0,600),xlab="")
+}
+par(mfrow=c(1,1))
+sapply(WalSen_ndvi_list, function(x) extract(x,y=wal_field, fun=mean))
+sapply(WalSen_ndvi_list, function(x) extract(x,y=wal_field, fun=median))
+
+```
+
+
+
+# The function to generate a data frame of reflectance and vegetation indices
+```{r}
+df_reflectance <- function(locations_method){
+
+  for(i in 1:length(locations_method)){
+    #change the value of reflectance (divided by 10000)
+    locations_method[[i]][,-1] <- locations_method[[i]][-1]/10000
+    
+    #add new columns of vegetation indices
+    ##ndvi
+    locations_method[[i]]$ndvi <- ndvi(locations_method[[i]])
+    #gci
+    locations_method[[i]]$gci <- gci(locations_method[[i]])
+    ##grvi1
+    locations_method[[i]]$grvi1 <- grvi1(locations_method[[i]])
+    ##gndvi
+    locations_method[[i]]$gndvi <- gndvi(locations_method[[i]])
+    ##sr
+    locations_method[[i]]$sr <- sr(locations_method[[i]])
+    ##sr.green
+    locations_method[[i]]$sr.green <- sr.green(locations_method[[i]])
+    ##cvi
+    locations_method[[i]]$cvi <- cvi(locations_method[[i]])
+    ##savi
+    locations_method[[i]]$savi <- savi(locations_method[[i]])
+    ##psri.nir
+    locations_method[[i]]$psri.nir <- psri.nir(locations_method[[i]])
+    ##ndvi.green
+    locations_method[[i]]$ndvi.green <- ndvi.green(locations_method[[i]])
+    ##msavi2
+    locations_method[[i]]$msavi2 <- msavi2(locations_method[[i]])
+    ##lai.savi
+    locations_method[[i]]$lai.savi <- lai.savi(locations_method[[i]])
+    ##cri
+    locations_method[[i]]$cri1 <- cri1(locations_method[[i]])
+    ##arvi
+    locations_method[[i]]$arvi <- arvi(locations_method[[i]])
+    ##ari2
+    locations_method[[i]]$ari2 <- ari2(locations_method[[i]])
+    ##ndwi
+    locations_method[[i]]$ndwi <- ndwi(locations_method[[i]])
+    ##re.ndwi
+    locations_method[[i]]$re.ndwi <- re.ndwi(locations_method[[i]])
+    ##re.ndvi.1
+    locations_method[[i]]$re.ndvi.1 <- re.ndvi.1(locations_method[[i]])
+    ##re.ndvi.2
+    locations_method[[i]]$re.ndvi.2 <- re.ndvi.2(locations_method[[i]])
+    ##re.ndvi.3
+    locations_method[[i]]$re.ndvi.3 <- re.ndvi.3(locations_method[[i]])
+    ##psri
+    locations_method[[i]]$psri <- psri(locations_method[[i]])
+    ##ndre.1
+    locations_method[[i]]$ndre.1 <- ndre.1(locations_method[[i]])
+    ##ndre.2
+    locations_method[[i]]$ndre.2 <- ndre.2(locations_method[[i]])
+    ##ndre.3
+    locations_method[[i]]$ndre.3 <- ndre.3(locations_method[[i]])
+    ##ndi.45
+    locations_method[[i]]$ndi.45 <- ndi.45(locations_method[[i]])
+    ##mtci
+    locations_method[[i]]$mtci <- mtci(locations_method[[i]])
+    ##msi
+    locations_method[[i]]$msi <- msi(locations_method[[i]])
+    ##mcari
+    locations_method[[i]]$mcari <- mcari(locations_method[[i]])
+    ##ireci
+    locations_method[[i]]$ireci <- ireci(locations_method[[i]])
+    ##ci.rededge
+    locations_method[[i]]$ci.rededge <- ci.rededge(locations_method[[i]])
+    ##ci.green
+    locations_method[[i]]$ci.green <- ci.green(locations_method[[i]])
+    ##cri2
+    locations_method[[i]]$cri2 <- cri2(locations_method[[i]])
+    ##chl.rededge.1
+    locations_method[[i]]$chl.rededge.1 <- chl.rededge.1(locations_method[[i]])
+    ##chl.rededge.2
+    locations_method[[i]]$chl.rededge.2 <- chl.rededge.2(locations_method[[i]])
+    ##chl.rededge.3
+    locations_method[[i]]$chl.rededge.3 <- chl.rededge.3(locations_method[[i]])
+    ##ari1
+    locations_method[[i]]$ari1 <- ari1(locations_method[[i]])
+    ##tcari.osavi
+    locations_method[[i]]$tcari.osavi <- tcari.osavi(locations_method[[i]])
+    ##mcari.osavi
+    locations_method[[i]]$mcari.osavi <- mcari.osavi(locations_method[[i]])
+    ##mcari.osavi.705
+    locations_method[[i]]$mcari.osavi.705 <- mcari.osavi.705(locations_method[[i]])
+    ##tcari.osavi.705
+    locations_method[[i]]$tcari.osavi.705 <- tcari.osavi.705(locations_method[[i]])
+    ##REP
+    locations_method[[i]]$REP <- REP(locations_method[[i]])
+    ##sccci.1
+    locations_method[[i]]$sccci.1 <- sccci.1(locations_method[[i]])
+    ##sccci.2
+    locations_method[[i]]$sccci.2 <- sccci.2(locations_method[[i]])
+    ##sccci.3
+    locations_method[[i]]$sccci.3 <- sccci.3(locations_method[[i]])
+  }
+  names(locations_method) <- as.Date.character(names(locations_method), format = "%Y%m%d")
+  return(locations_method)
+}
+```
+
+
+#Use of df_reflectance function to calculate vegetation index
+```{r}
+#drop 20170831 data
+WalSen_centers_sim$`20170831` <- NULL
+WalSen_centers_bil$`20170831` <- NULL
+df_WalSen_centers_sim <- df_reflectance(WalSen_centers_sim)
+df_WalSen_centers_bil <- df_reflectance(WalSen_centers_bil)
+```
+
+
+#integrate with swp data
+##integrate_swp function
+```{r}
+integrate_swp <- function(df_locations_method, locations){
+  if (locations == "points"){
+    locations_method_select <- list()
+    for(i in 1:length(df_locations_method)){
+      #match the date
+      swp_select <- swp_sen_datelist[[which(names(swp_sen_datelist) == names(df_locations_method)[i])]]
+      #merge two data frame
+      locations_method_select[[i]] <- merge(df_locations_method[[i]], swp_select, by = "ID", sort = TRUE)
+    }
+  }
+  else if(locations == "centers" | locations == "blocks"){
+    locations_method_select <- list()
+    for(i in 1:length(df_locations_method)){
+      #match the date with swp.ave_sen_datelist
+      swp_select <- swp.ave_sen_datelist[[which(names(swp.ave_sen_datelist) == names(df_locations_method)[i])]]
+      #merge two data frame
+      locations_method_select[[i]] <- merge(df_locations_method[[i]], swp_select, by = "ID", sort = TRUE)
+    }
+  }
+  names(locations_method_select) <- names(df_locations_method)
+  return(locations_method_select)
+}
+```
+
+##integration of swp data and sentinel data
+```{r}
+#drop 20170831 data
+swp.ave_sen_datelist$`2017-08-31` <- NULL
+swp_sen_datelist$`2017-08-31` <- NULL
+#we have 5 dates of data left
+
+swp_WalSen_cs <- integrate_swp(df_WalSen_centers_sim, locations = "centers")
+swp_WalSen_cb <- integrate_swp(df_WalSen_centers_bil, locations = "centers")
+
+
+```
+
+##integration of weather data
+```{r}
+path_weather <- "C:/Users/tangz/Box Sync/Zhehan/sentinel water stress detection"
+#path_weather <- "E:/CITRIS Project/Walnut_weather"
+weather_wal <- read.csv(file.path(path_weather,"20171013 walnut weather.csv"), header = TRUE)
+
+#change the date format
+weather_wal$date <- as.Date(weather_wal$date, format = "%m/%d/%Y")
+
+weather_wal$date
+
+#integration with swp_WalSen_cs 
+for(i in 1:length(swp_WalSen_cb)){
+  #match the date
+  weather_select <- weather_wal[which(as.character(weather_wal$date) == names(swp_WalSen_cb)[i]),]
+  swp_WalSen_cb[[i]] <- merge(swp_WalSen_cb[[i]], weather_select, by = "date")
+}
+
+for(i in 1:length(swp_WalSen_cs)){
+  #match the date
+  weather_select <- weather_wal[which(as.character(weather_wal$date) == names(swp_WalSen_cs)[i]),]
+  swp_WalSen_cs[[i]] <- merge(swp_WalSen_cs[[i]], weather_select, by = "date")
+}
+
+
+```
+
+##integration of irrigation data
+```{r}
+names(swp_WalSen_cb)
+dim(swp_WalSen_cb$`2017-06-19`)
+swp_WalSen_cb$`2017-06-19`
+
+```
+
+
+#create a big data frame and output the csv
+```{r}
+#combine the sublists
+ws_cs_df <- do.call(rbind, swp_WalSen_cs)
+rownames(ws_cs_df) <- NULL
+ws_cb_df <- do.call(rbind, swp_WalSen_cb)
+rownames(ws_cb_df) <- NULL
+
+#output the csv
+write.csv(ws_cs_df, file = file.path(path_wal_sen, "ws_cs_df.csv"), col.names = TRUE, row.names = FALSE)
+write.csv(ws_cb_df, file = file.path(path_wal_sen, "ws_cb_df.csv"), col.names = TRUE, row.names = FALSE)
+
+```
+
