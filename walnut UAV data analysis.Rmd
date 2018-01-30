@@ -1,0 +1,650 @@
+---
+title: "Walnut UAV data analysis"
+author: "Zhehan"
+date: "November 1, 2017"
+output: html_document
+---
+
+#prepare 
+```{r}
+library(raster)
+library(caret)
+```
+
+
+```{r}
+read_uav <- function(path, red, green, blue, rededge, nir){
+  #read raster layer
+  uav_red <- raster(file.path(path, red))
+  uav_green <- raster(file.path(path, green))
+  uav_blue <- raster(file.path(path, blue))
+  uav_rededge <- raster(file.path(path, rededge))
+  uav_nir <- raster(file.path(path, nir))
+  
+  #brick the 5 bands 
+  uav_brick <- brick(stack(uav_blue, uav_green, uav_red, uav_rededge, uav_nir))
+  
+  #rename the bands
+  names(uav_brick) <- c("blue","green","red","rededge","nir")
+  
+  return(uav_brick)
+}
+```
+
+#read uav image
+```{r}
+uav_20170711 <- read_uav(path = "G:/CITRIS Project/Walnut_UAV/20170711 Tehama walnut UAV/4_index/reflectance",
+                         red = "20170711 tehama walnut uav_transparent_reflectance_red.tif", 
+                         blue = "20170711 tehama walnut uav_transparent_reflectance_blue.tif",
+                         green = "20170711 tehama walnut uav_transparent_reflectance_green.tif",
+                         rededge = "20170711 tehama walnut uav_transparent_reflectance_rededge.tif",
+                         nir = "20170711 tehama walnut uav_transparent_reflectance_nir.tif")
+
+uav_20170724 <- read_uav(path = "G:/CITRIS Project/Walnut_UAV/20170724 Tehama walnut UAV/4_index/reflectance",
+                         blue  = "20170724 tehama walnut uav_transparent_reflectance_blue.tif", 
+                         green = "20170724 tehama walnut uav_transparent_reflectance_green.tif",
+                         red = "20170724 tehama walnut uav_transparent_reflectance_red.tif",
+                         rededge = "20170724 tehama walnut uav_transparent_reflectance_rededge.tif",
+                         nir = "20170724 tehama walnut uav_transparent_reflectance_nir.tif")
+
+uav_20170822 <- read_uav(path = "G:/CITRIS Project/Walnut_UAV/20170822 Tehama walnut UAV/4_index/reflectance",
+                         blue  = "20170822 tehama walnut uav_transparent_reflectance_blue.tif", 
+                         green = "20170822 tehama walnut uav_transparent_reflectance_green.tif",
+                         red = "20170822 tehama walnut uav_transparent_reflectance_red.tif",
+                         rededge = "20170822 tehama walnut uav_transparent_reflectance_rededge.tif",
+                         nir = "20170822 tehama walnut uav_transparent_reflectance_nir.tif")
+
+uav_20170711@extent
+uav_20170711@ncols
+uav_20170711@nrows
+res(uav_20170711)
+res(uav_20170724)
+res(uav_20170822)
+```
+
+#plot uav image
+```{r}
+plotRGB(uav_20170711, 3, 2, 1, stretch = "lin" )
+plot(MAP2_centers, add=TRUE, col='red')
+
+plotRGB(uav_20170724, 3, 2, 1, stretch = "lin")
+plot(MAP2_centers, add=TRUE, col='red')
+
+plotRGB(uav_20170822, 3, 2, 1, stretch = "lin")
+plot(MAP2_centers, add=TRUE, col='red')
+```
+
+#read the shapefile of MAP2 and MAP2_points
+```{r}
+path_boundary <- "G:/CITRIS Project/site locations/Shapefiles"
+#this is the shapefile of the boundary of blocks
+wal_blocks <- shapefile(file.path(path_boundary, "MAP2_blocks.shp"))
+
+#use '_' to replace ' ' and ','
+wal_blocks$Name <- gsub(x=gsub(x = wal_blocks$Name, replacement = '', pattern = ","),replacement ="_", pattern = " " )
+#change grower's practice to 0_bar_below
+wal_blocks$Name <- gsub(wal_blocks$Name, pattern = "Grower's_practice", replacement = "0_bar_below")
+
+#unify the crs
+wal_blocks <- spTransform(wal_blocks, crs(uav_20170711))
+
+#remove the big boundary
+wal_field <- wal_blocks[wal_blocks$Name == "2014_Tehama_Walnut_Irrigation_Treatment",]
+wal_blocks <- wal_blocks[wal_blocks$Name != "2014_Tehama_Walnut_Irrigation_Treatment",]
+
+```
+
+
+#Read the shapefile of MAP2_points
+```{r}
+wal_points <- shapefile(file.path(path_boundary, "MAP2_points.shp"))
+#use '_' to replace ' ' and ','
+wal_points$Name <- gsub(x=gsub(x = wal_points$Name, replacement = '', pattern = ","),replacement ="_", pattern = " " )
+#change grower's practice to 0_bar_below
+wal_points$Name <- gsub(wal_points$Name, pattern = "Grower's_practice", replacement = "0_bar_below")
+#change "3_bar" to "3_bars"
+wal_points$Name <- gsub(wal_points$Name, pattern = "3_bar_", replacement = "3_bars_")
+#change "4_bar" to "4_bars"
+wal_points$Name <- gsub(wal_points$Name, pattern = "4_bar_", replacement = "4_bars_")
+#remove extra dimension of coordinate system
+wal_points@coords <- wal_points@coords[,1:2]
+#unify the crs
+wal_points <- spTransform(wal_points, crs(uav_20170711))
+
+```
+
+
+#create a new data frame of the spatial points data frame of the centers of two points in each block
+```{r}
+#Add a column of blocks to wal_points
+wal_points$blocks <- sapply(strsplit(wal_points$Name, "_Tree",1),'[',1)
+#split them by blocks so that we can have 
+wal_centers_split <- split(wal_points, wal_points$blocks)
+wal_centers_split <- lapply(wal_centers_split, function(x) SpatialPointsDataFrame(coords = matrix(colMeans(x@coords),1,2), proj4string = x@proj4string, data = data.frame(Name = unique(x$blocks))))
+
+wal_centers <- do.call(rbind,wal_centers_split)
+wal_centers$Name <- as.character(wal_centers$Name)
+
+#-------------------------------------------------------#
+#order it
+wal_blocks <- wal_blocks[order(wal_blocks$Name),]
+wal_centers <- wal_centers[order(wal_centers$Name),]
+wal_points <- wal_points[order(wal_points$Name),]
+wal_centers_buffer = buffer(wal_centers, 5)
+
+#-------------------------------------------------------#
+#plot it
+plot(wal_field)
+plot(wal_blocks, add = TRUE )
+plot(wal_centers, add= TRUE, pch = 20, col = 'red')
+plot(wal_points, add = TRUE)
+plot(wal_centers_buffer, add = TRUE)
+
+
+plot(wal_field)
+plot(wal_centers_buffer, add = TRUE)
+
+plot(wal_field)
+plot(wal_blocks, add = TRUE)
+plot(wal_blocks[wal_blocks$Name=="4_bars_below_Rep_5",], add = TRUE, col='red')
+plot(wal_blocks[wal_blocks$Name=="4_bars_below_Rep_4",], add = TRUE, col='red')
+
+```
+
+
+#set NDVI threshold to tease out bare soil
+```{r}
+ndvi_uav_20170711 <- ndvi(uav_20170711)
+ndvi_uav_20170724 <- ndvi(uav_20170724)
+ndvi_uav_20170822 <- ndvi(uav_20170822)
+
+#set threshold to be 0.7
+veg_uav_20170711 <- calc(ndvi_uav_20170711, function(x){x[x<0.7]<-NA; return(x)})
+
+veg_uav_20170724 <- calc(ndvi_uav_20170724, function(x){x[x<0.7]<-NA; return(x)})
+
+veg_uav_20170822 <- calc(ndvi_uav_20170822, function(x){x[x<0.7]<-NA; return(x)})
+
+plot(veg_uav_20170711)
+plot(wal_centers, add = TRUE, col= 'red')
+
+plot(veg_uav_20170724)
+plot(wal_centers, add = TRUE, col= 'red')
+
+plot(veg_uav_20170822)
+plot(wal_centers, add = TRUE, col= 'red')
+
+#mask out
+uav_20170711_mask <- raster::mask(x=uav_20170711, mask=veg_uav_20170711)
+plotRGB(uav_20170711_mask,3,2,1, stretch='lin')
+plot(wal_centers, add = TRUE, col= 'red')
+
+uav_20170724_mask <- raster::mask(x=uav_20170724, mask=veg_uav_20170724)
+plotRGB(uav_20170724_mask,3,2,1, stretch='lin')
+plot(wal_centers, add = TRUE, col= 'red')
+
+uav_20170822_mask <- raster::mask(x=uav_20170822, mask=veg_uav_20170822)
+plotRGB(uav_20170822_mask,3,2,1, stretch='lin')
+plot(wal_centers, add = TRUE, col= 'red')
+plot(wal_blocks, add = TRUE)
+
+```
+
+#extract reflectance
+```{r}
+#Extract function. It does not work due to something with buffer settings
+extract_uav <- function(uav_image, MAP2_locations, buffer, method, fun){
+  extract_ref <- raster::extract(x=uav_image, y = MAP2_locations, buffer, method, fun, df = TRUE, na.rm = TRUE)
+  extract_ref$ID <- MAP2_locations$Name
+  return(extract_ref)
+}
+
+
+#extract information
+ref_uav_20170711 <- raster::extract(x=uav_20170711_mask, y=wal_centers, buffer = 5, fun=mean, na.rm = TRUE, df= TRUE)
+ref_uav_20170711$ID <- wal_centers$Name
+
+ref_uav_20170724 <- raster::extract(x=uav_20170724_mask, y=wal_centers, buffer = 5, fun =mean, na.rm=TRUE, df=TRUE)
+ref_uav_20170724$ID <- wal_centers$Name
+
+
+ref_uav_20170822 <- raster::extract(x=uav_20170822_mask, y=wal_centers, buffer = 5, fun =mean, na.rm=TRUE, df=TRUE)
+ref_uav_20170822$ID <- wal_centers$Name
+
+#remove the rows that is not covered by our plot
+ref_uav_20170711 <- ref_uav_20170711[-c(1,6,9,16,22,23),]
+
+```
+
+
+#calculate some indices for micasense rededge
+```{r}
+ndvi <- function(uav){
+  red <- uav$red
+  nir <- uav$nir
+  ndvi <- (nir-red)/(nir+red)
+  return(ndvi)
+}
+
+ndre <- function(uav){
+  nir <- uav$nir
+  rededge <- uav$rededge
+  ndre <- (nir-rededge)/(nir+rededge)
+  return(ndre)
+}
+
+gndvi <- function(uav){
+  green <- uav$green
+  nir <- uav$nir
+  gndvi <- (nir-green)/(nir+green)
+  return(gndvi)
+}
+
+osavi <- function(uav){
+  nir <- uav$nir
+  red <- uav$red
+  osavi <- (1+0.16)*(nir-red)/(nir+red+0.16)
+}
+
+grvi1 <- function(sentinel){
+  band_red <- sentinel$red
+  band_green <- sentinel$green
+  grvi1 <- (band_red - band_green)/(band_red + band_green)
+  return(grvi1)
+}
+
+evi <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_red <- sentinel$red
+  band_blue <- sentinel$blue
+  evi <- (2.5*(band_nir-band_red)/(band_nir+6*band_red-7.5*band_blue+1))
+  return(evi)
+}
+
+evi2 <- function(sentinel){
+  band_red <- sentinel$red
+  band_nir <- sentinel$nir
+  evi2 <- 2.5*(band_nir-band_red)/(band_nir+2.4*band_red+1)
+  return(evi2)
+}
+
+sr <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_red <- sentinel$red
+  sr <- band_nir/band_red
+  return(sr)
+}
+
+sr.green <- function(sentinel){
+  band_842 <- sentinel$nir
+  band_560 <- sentinel$green
+  sr.green <- band_842/band_560
+  return(sr.green)
+}
+
+cvi <- function(sentinel){
+  band_842 <- sentinel$nir
+  band_560 <- sentinel$green
+  band_665 <- sentinel$red
+  cvi <- (band_842/band_560)/(band_560+band_665)
+  return(cvi)
+}
+
+savi <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_red <- sentinel$red
+  savi <- 1.5*(band_nir-band_red)/(band_nir+band_red+0.5)
+  return(savi)
+}
+
+psri.nir <- function(sentinel){
+  band_red <- sentinel$red
+  band_blue <- sentinel$blue
+  band_nir <- sentinel$nir
+  psri.nir <- (band_red - band_blue)/(band_nir)
+  return(psri.nir)
+}
+
+ndvi.green <- function(sentinel){
+  band_green <- sentinel$green
+  band_nir <- sentinel$nir
+  band_red <- sentinel$red
+  ndvi.green <- band_green*(band_nir - band_red)/(band_nir + band_red)
+  return(ndvi.green)
+}
+
+msavi2 <- function(sentinel){
+  band_red <- sentinel$red 
+  band_nir <- sentinel$nir
+  msavi2 <- (band_nir + 1) - 0.5*sqrt((2*band_nir - 1)^2 + 8*band_red)
+  return(msavi2)
+}
+
+lai.savi <- function(sentinel){
+  band_red <- sentinel$red 
+  band_nir <- sentinel$nir
+  lai.savi <- -log(0.371 + 1.5*(band_nir - band_red)/(band_nir + band_red + 0.5))/2.4
+  return(lai.savi)
+}
+
+cri1 <- function(sentinel){
+  band_green <- sentinel$green
+  band_blue <- sentinel$blue
+  cri1 <- (1/band_blue)-(1/band_green)
+  return(cri1)
+}
+
+arvi <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_red <- sentinel$red
+  band_blue <- sentinel$blue
+  arvi <- (band_nir - (2*band_red - band_blue))/(band_nir + (2*band_red-band_blue))
+  return(arvi)
+}
+
+ari2 <- function(sentinel){
+  band_nir <- sentinel$nir
+  band_blue <- sentinel$blue
+  band_green <- sentinel$green
+  ari2 <- (band_nir/band_blue)-(band_nir/band_green)
+  return(ari2)
+}
+
+re.ndwi <- function(uav){
+  band_rededge <- uav$rededge
+  band_green <- uav$green
+  re.ndwi <- (band_green-band_rededge)/(band_green+band_rededge)
+  return(re.ndwi)
+}
+
+
+
+```
+
+```{r}
+uav_indices <- function(uav){
+  uav$ndvi <- ndvi(uav)
+  uav$ndre <- ndre(uav)
+  uav$re.ndwi <- re.ndwi(uav)
+  uav$air2 <- ari2(uav)
+  uav$arvi <- arvi(uav)
+  uav$cri1 <- cri1(uav)
+  uav$lai.savi <- lai.savi(uav)
+  uav$msavi2 <- msavi2(uav)
+  uav$ndvi.green <- ndvi.green(uav)
+  uav$psri.nir <- psri.nir(uav)
+  uav$savi <- savi(uav)
+  uav$cvi <- cvi(uav)
+  uav$sr.green <- sr.green(uav)
+  uav$sr <- sr(uav)
+  uav$evi2 <- evi2(uav)
+  uav$evi <- evi(uav)
+  uav$grvi1 <- grvi1(uav)
+  uav$osavi <- osavi(uav)
+  uav$gndvi <- gndvi(uav)
+  return(uav)
+}
+
+df_uav_20170711 <- uav_indices(ref_uav_20170711)
+df_uav_20170724 <- uav_indices(ref_uav_20170724)
+df_uav_20170822 <- uav_indices(ref_uav_20170822)
+```
+
+#read swp data
+```{r}
+path_swp <- "G:/CITRIS Project/Walnut_SWP/2017 walnut swp raw data"
+#path_swp <- "C:/Users/tangz/Box Sync/Zhehan/sentinel water stress detection"
+swp <- read.csv(file.path(path_swp, "20171013 walnut swp.csv"), header = TRUE)
+#SELECT columns
+swp <- dplyr::select(swp, Measure.ment.Date, Rep, Irrigation.Treatment.Code, Tree.., Orchard.SWP........bars.,Bars.Below.Base.Line)
+#change the colname of the dataframe
+colnames(swp) <- c("date", "rep", "irrigation", "tree", "swp", "swp.bs")
+#change the date format
+swp$date <- as.Date(swp$date, format = "%m/%d/%Y")
+
+#change the name of irrigation 
+swp$irrigation <- gsub(swp$irrigation, pattern = " ", replacement = "_")
+swp$irrigation <- gsub(swp$irrigation, pattern = "Grower_Practice", replacement = "0_bar_below")
+
+#add a new column of indiviudal tree
+swp$ID <- paste(swp$irrigation,"Rep", swp$rep, "Tree", swp$tree, sep = "_")
+
+#change the class of each column
+swp$rep <- as.factor(swp$rep)
+swp$irrigation <- as.factor(swp$irrigation)
+swp$tree <- as.factor(swp$tree)
+swp$ID <- as.factor(swp$ID)
+#change the order of the data frame, making ID at the beginging
+swp <- swp %>% dplyr::select(ID, everything())
+
+head(swp)
+tail(swp)
+
+swp_ID_list <- split(swp, swp$ID)
+
+```
+
+```{r}
+swp_uav <- subset(swp,date %in% as.Date(c('2017-07-11','2017-07-24','2017-08-22'))) 
+dim(swp_uav)
+#split with dates
+swp_uav_datelist <- split(swp_uav, swp_uav$date)
+
+#create an empty list to swp_ave
+swp.ave_uav_datelist <- list()
+for(i in 1:length(swp_uav_datelist)){
+  #aggregate to calculate the average of swp from two trees in th same block
+  swp.ave_uav_datelist[[i]] <- aggregate(x=swp_uav_datelist[[i]][6:7], by = list(date = swp_uav_datelist[[i]]$date, rep=swp_uav_datelist[[i]]$rep, irrigation = swp_uav_datelist[[i]]$irrigation), FUN = mean)
+  #rename the fourth column from "x" to "swp"
+  colnames(swp.ave_uav_datelist[[i]])[4] = "swp"
+  #create a new column called "ID", which is the block name 
+  swp.ave_uav_datelist[[i]]$ID <- paste(swp.ave_uav_datelist[[i]]$irrigation, "Rep", swp.ave_uav_datelist[[i]]$rep, sep = "_")
+  #change the ID column from character to factor
+  swp.ave_uav_datelist[[i]]$ID <- as.factor(swp.ave_uav_datelist[[i]]$ID)
+  #make the ID column come to the front 
+  #swp.ave_uav_datelist[[i]] <- swp.ave_uav_datelist[[i]] %>% dplyr::select(ID, everything())
+
+  #name each sublist
+  names(swp.ave_uav_datelist)[i] <- names(swp_uav_datelist)[i]
+
+}
+
+```
+
+#integrate corresponding swp to the reflectance table
+```{r}
+df_uav_20170711 <- merge(df_uav_20170711, swp.ave_uav_datelist$`2017-07-11`, by = "ID", sort = TRUE)
+df_uav_20170724 <- merge(df_uav_20170724, swp.ave_uav_datelist$`2017-07-24`, by = "ID", sort = TRUE)
+df_uav_20170822 <- merge(df_uav_20170822, swp.ave_uav_datelist$`2017-08-22`, by = "ID", sort = TRUE)
+
+```
+
+#integrate weather data
+```{r}
+#path_weather <- "C:/Users/tangz/Box Sync/Zhehan/sentinel water stress detection"
+path_weather <- "G:/CITRIS Project/Walnut_weather"
+weather_wal <- read.csv(file.path(path_weather,"20171013 walnut weather.csv"), header = TRUE)
+
+#change the date format
+weather_wal$date <- as.Date(weather_wal$date, format = "%m/%d/%Y")
+
+weather_wal$date
+
+#integration with swp_WalSen_cs 
+df_uav_20170711 <- merge(df_uav_20170711, weather_wal[which(as.character(weather_wal$date)== "2017-07-11"),], by = "date")
+df_uav_20170724 <- merge(df_uav_20170724, weather_wal[which(as.character(weather_wal$date)== "2017-07-24"),], by = "date")
+df_uav_20170822 <- merge(df_uav_20170822, weather_wal[which(as.character(weather_wal$date)== "2017-08-22"),], by = "date")
+
+```
+
+#combine three different dates
+```{r}
+wal_uav_df <- rbind(df_uav_20170711, df_uav_20170724, df_uav_20170822)
+ggplot(data=wal_uav_df, aes(x=ndvi, y=swp))+geom_point(aes(color=factor(date)))
+
+head(wal_uav_df) 
+
+#output this data frame
+path_uav <- "G:/CITRIS Project/Walnut_UAV"
+write.csv(wal_uav_df, file = file.path(path_uav, "wal_uav_df.csv"), col.names = TRUE, row.names = FALSE)
+```
+
+
+
+
+
+
+#----------------------------------------Preprocessing--------------------------------------------#
+
+#correlation with swp
+```{r}
+p_cs_uav <- apply(wal_uav_df[,c(3:26,31,32)],2,function(x) anova(lm(wal_uav_df$swp~x))$`Pr(>F)`[1])
+#r-square of correlation with swp
+r_cs_uav <- apply(wal_uav_df[,c(3:26,31,32)],2,function(x) summary(lm(wal_uav_df$swp~x))$r.squared)
+
+
+#p-value of correlation with swp.bs
+p_cs_uav.bs <- apply(wal_uav_df[,c(3:26,31,32)],2,function(x) anova(lm(wal_uav_df$swp.bs~x))$`Pr(>F)`[1])
+#r-square of correlation with swp.bs
+r_cs_uav.bs <- apply(wal_uav_df[,c(3:26,31,32)],2,function(x) summary(lm(wal_uav_df$swp.bs~x))$r.squared)
+
+```
+
+#filter 2: feature selection using rfe in caret package
+```{r}
+set.seed(777)
+rfecontrol_uav <- rfeControl(functions = rfFuncs, method = "repeatedcv", number = 10, repeats = 3)
+rfesubset <- c(4:10,15,20,25,26)
+
+rfe_uav_1 <- rfe(x = X_uav_filter1, y=df_uav$swp, rfeControl = rfecontrol_uav, sizes = rfesubset, metric = "Rsquared")
+rfe_uav_2 <- rfe(x = wal_uav_df[,c(3:26,31,32)], y=df_uav$swp, rfeControl = rfecontrol_uav, sizes = rfesubset, metric = "Rsquared")
+
+rfe_uav_swpbs <- rfe(x = wal_uav_df[,c(3:26,31,32)], y=df_uav$swp.bs, rfeControl = rfecontrol_uav, sizes = rfesubset, metric = "Rsquared")
+
+
+plot(rfe_uav_1, type = 'b')
+plot(rfe_uav_2, type = 'b')
+
+rfe_uav
+rfe_uav$optVariables
+
+#apply this filter
+X_uav_filter2 <- X_uav_filter1[,rfe_uav_1$optVariables]
+head(X_uav_filter2)
+```
+
+#fit control function 
+```{r}
+set.seed(777)
+control_uav <- trainControl(method="repeatedcv", number = 10, repeats = 3)
+```
+
+#ridge regression 
+```{r}
+#tune parameters with tunelength=10
+ridge_uav_swp <- train(swp~., data=wal_uav_df[,c(3:26,29,31,32)], method='ridge',trControl=fitControl, tuneLength=10, preProcess = c('center','scale'))
+predict(ridge_uav_swp$finalModel, type='coef', mode="norm")$coefficients[10,]
+
+
+ridge_uav_swpbs <- train(swp.bs~., data=wal_uav_df[,c(3:26,30,31,32)], method='ridge',trControl=fitControl, tuneLength=10, preProcess = c('center','scale'))
+#the coefficients
+predict(ridge_uav_swpbs$finalModel, type='coef', mode="norm")$coefficients[10,]
+```
+
+#lasso regression 
+```{r}
+#tune parameters with tunelength=10
+lasso_uav_swp <- train(swp~., data=wal_uav_df[,c(3:26,29,31,32)], method='lasso',trControl=fitControl, tuneLength=10, preProcess = c('center','scale'))
+predict(lasso_uav_swp$finalModel, type='coef', mode="norm")$coefficients[10,]
+
+
+lasso_uav_swpbs <- train(swp.bs~., data=wal_uav_df[,c(3:26,30,31,32)], method='lasso',trControl=fitControl, tuneLength=10, preProcess = c('center','scale'))
+#the coefficients
+predict(lasso_uav_swpbs$finalModel, type='coef', mode="norm")$coefficients[10,]
+
+```
+
+
+#rank features by importance from random forest
+```{r}
+
+
+#train with random forest regression model
+$#model_rf_uav_1 <- train(x=X_uav_filter2, y=df_uav$swp, method = "rf", preProcess = c("scale","center"), trControl = control_uav, importance = TRUE, tuneLength = 10)
+model_rf_uav <- train(x=wal_uav_df[,c(3:26,31,32)], y=df_uav$swp, method = "rf", preProcess = c("scale","center"), trControl = control_uav, importance = TRUE, tuneLength = 10)
+
+model_rf_uav_swpbs <- train(x=wal_uav_df[,c(3:26,31,32)], y=df_uav$swp.bs, method = "rf", preProcess = c("scale","center"), trControl = control_uav, importance = TRUE, tuneLength = 10)
+
+
+model_rf_uav
+importance_rf_uav <- varImp(model_rf_uav)
+importance_rf_uav
+
+model_rf_uav_total <- train(x=X_uav_filter1, y=df_uav$swp, method = "rf", preProcess = "scale", trControl = control_uav, importance = TRUE)
+
+model_rf_uav
+model_rf_uav_total
+varImp(model_rf_uav)
+varImp(model_rf_uav_total)
+```
+
+#before running the classification 
+```{r}
+swp.max = max(wal_uav_df$swp)
+swp.min = min(wal_uav_df$swp)
+swp.max
+swp.min
+swp_classification <- function(swp){
+  swp_class <- cut(swp, breaks = c(swp.max, -4, -6, -8, -14),  labels = 4:1)
+  return(swp_class)
+}
+
+swp_classification.2 <- function(swp){
+  swp_class <- cut(swp, breaks = c(swp.max, -4, -6, -14), labels = 3:1)
+  return(swp_class)
+}
+
+
+```
+
+```{r}
+model_rf.class_uav <- train(x=wal_uav_df[,c(3:26,31,32)], y=swp_classification(wal_uav_df$swp), method = "rf", preProcess = c("center","scale"), trControl = control_uav, importance = TRUE)
+model_rf.class2_uav <- train(x=wal_uav_df[,c(3:26,31,32)], y=swp_classification.2(wal_uav_df$swp), method = "rf", preProcess = c("center","scale"), trControl = control_uav, importance = TRUE)
+
+varImp(model_rf.class_uav)
+varImp(model_rf.class2_uav)
+
+confusionMatrix(model_rf.class_uav)
+confusionMatrix(model_rf.class2_uav)
+
+model_rf.class_uav_total <- train(x=X_uav_filter1, y=swp_classification(df_uav$swp), method = "rf", preProcess = "scale", trControl = control_uav, importance = TRUE)
+
+model_rf.class2_uav <- train(x=X_uav_filter2, y=swp_classification.2(df_uav$swp), method = "rf", preProcess = "scale", trControl = control_uav, importance = TRUE)
+
+model_rf.class2_uav_total <- train(x=X_uav_filter1, y=swp_classification.2(df_uav$swp), method = "rf", preProcess = "scale", trControl = control_uav, importance = TRUE)
+
+model_rf.class_uav
+model_rf.class_uav_total
+varImp(model_rf.class_uav)
+varImp(model_rf.class_uav_total)
+
+confusionMatrix(model_rf.class_uav)
+confusionMatrix(model_rf.class_uav_total)
+confusionMatrix(model_rf.class2_uav)
+confusionMatrix(model_rf.class2_uav_total)
+```
+
+
+```{r}
+ggplot(data=df_uav, aes(x=re.ndwi,y=swp))+geom_point()
+ggplot(data=df_uav, aes(x=re.ndwi, y=swp))+geom_point(aes(color=factor(date)))
+ggplot(data=df_uav, aes(x=grvi1, y=swp))+geom_point(aes(color=factor(date)))
+ggplot(data=df_uav, aes(x=psri.nir, y=swp))+geom_point(aes(color=factor(date)))
+
+```
+
+```{r}
+df_uav$swp.class <- swp_classification(df_uav$swp)
+summary(df_uav$swp.class)
+```
+
