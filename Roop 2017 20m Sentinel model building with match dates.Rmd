@@ -1,0 +1,434 @@
+---
+title: "Roop 2017 20m Sentinel model building with match dates"
+author: "Zhehan Tang"
+date: "January 30, 2018"
+output: html_document
+---
+#package preparation 
+```{r}
+library(leaps)
+library(caret)
+library(car)
+library(MASS)
+library(dplyr)
+library(gbm)
+library(lars)
+library(elsticnet)
+library(pls)
+```
+
+#read csv
+```{r}
+#path_wal_sen <- "C:/Users/tangz/Box Sync/Zhehan/sentinel water stress detection/sentinel with match dates"
+path_output <- "G:/CITRIS Project/Results"
+roop_2017_20m <- read.csv(file.path(path_output, "roop_2017_20m.csv"), header = TRUE)
+
+#change data type of some columns
+roop_2017_20m$irrigation <- as.factor(roop_2017_20m$irrigation)
+roop_2017_20m$ID <- as.factor(roop_2017_20m$ID)
+roop_2017_20m$rep <- as.factor(roop_2017_20m$rep)
+roop_2017_20m$date <- as.factor(roop_2017_20m$date)
+
+dim(roop_2017_20m)
+
+#only numeric data
+#roop_2017_20m_num <- select_if(roop_2017_20m, is.numeric)
+
+```
+
+#The function to classify swp to 4 groups or 3 groups
+```{r}
+swp.max = max(roop_2017_20m$swp)
+swp.min = min(roop_2017_20m$swp)
+swp.max
+swp.min
+swp_classification <- function(swp){
+  swp_class <- cut(swp, breaks = c(swp.max, -4, -6, -8, -14), labels = 4:1)
+  return(swp_class)
+}
+
+swp_classification.2 <- function(swp){
+  swp_class <- cut(swp, breaks = c(swp.max, -4, -6, -14), labels = 3:1)
+  return(swp_class)
+}
+
+```
+
+#preprocessing
+```{r}
+#randomly shuffle rows
+set.seed(777)
+roop_2017_20m_r <- roop_2017_20m[sample(nrow(roop_2017_20m)),]
+
+#split X and y
+roop_2017_20m_X <- roop_2017_20m_r[,c(3:56,61,62)]
+roop_2017_20m_y <- roop_2017_20m_r[,c(59,60)]
+roop_2017_20m_y$swp.class4 <- swp_classification(roop_2017_20m_y$swp)
+roop_2017_20m_y$swp.class3 <- swp_classification.2(roop_2017_20m_y$swp)
+
+#normalize data
+roop_2017_20m_X_norm <- predict(preProcess(roop_2017_20m_X, method=c("center","scale")),newdata = roop_2017_20m_X)
+
+#separating traning and testing data
+set.seed(777)
+trainIndex <- createDataPartition(roop_2017_20m_y$swp.class4, p=0.6, list = FALSE)
+train_roop_2017_20m_X <- roop_2017_20m_X_norm[trainIndex,]
+test_roop_2017_20m_X <- roop_2017_20m_X_norm[-trainIndex,]
+train_roop_2017_20m_y <- roop_2017_20m_y[trainIndex,]
+test_roop_2017_20m_y <- roop_2017_20m_y[-trainIndex,]
+```
+
+
+
+#Correlation with swp or swp.bs
+```{r}
+#p-value of correlation with swp
+p_roop_2017_20m <- apply(roop_2017_20m[,c(3:56,61,62)],2,function(x) anova(lm(roop_2017_20m$swp~x))$`Pr(>F)`[1])
+#r-square of correlation with swp
+r_roop_2017_20m <- apply(roop_2017_20m[,c(3:56,61,62)],2,function(x) summary(lm(roop_2017_20m$swp~x))$r.squared)
+
+p_roop_2017_20m.bs <- apply(roop_2017_20m[,c(3:56,61,62)],2,function(x) anova(lm(roop_2017_20m$swp.bs~x))$`Pr(>F)`[1])
+#r-square of correlation with swp
+r_roop_2017_20m.bs <- apply(roop_2017_20m[,c(3:56,61,62)],2,function(x) summary(lm(roop_2017_20m$swp.bs~x))$r.squared)
+
+sort(r_roop_2017_20m)
+sort(r_roop_2017_20m.bs)
+```
+
+#Feature selection by using rfe (recursive feature elimination) in caret package
+```{r}
+#settings
+set.seed(777)
+##random forest
+rfeControl_rf <- rfeControl(functions = rfFuncs, method = "repeatedcv", number = 10, repeats = 3)
+##linear regression
+rfeControl_lm <- rfeControl(functions = lmFuncs, method = "repeatedcv", number = 10, repeats = 3)
+##naive bayes
+rfeControl_nb <- rfeControl(functions = nbFuncs, method = "repeatedcv", number = 10, repeats = 3)
+##bagged trees
+rfeControl_bt <- rfeControl(functions = treebagFuncs, method = "repeatedcv", number = 10, repeats = 3)
+
+
+##check different subsets
+rfesubsets <- c(4,6,8,10,15,20,25,30,35,40,45,50,55)
+
+#run rfe model
+##random forest
+rfe_rf_swp <- rfe(x = train_roop_2017_20m_X, y=train_roop_2017_20m_y$swp, rfeControl = rfeControl_rf, sizes = rfesubsets)
+rfe_rf_swp$optVariables
+rfe_rf_swp
+plot(rfe_rf_swp, type=c("g","o"))
+plot(rfe_rf_swp, metric = "Rsquared", type=c("g","o"))
+
+#run linear regression 
+rfe_lm_swp <- rfe(x = train_roop_2017_20m_X, y=train_roop_2017_20m_y$swp, rfeControl = rfeControl_lm, sizes = rfesubsets)
+rfe_lm_swp$optVariables
+rfe_lm_swp
+plot(rfe_lm_swp, type=c("g","o"))
+plot(rfe_lm_swp, metric = "Rsquared", type=c("g","o"))
+
+#run naive bayes
+rfe_nb_swp <- rfe(x = train_roop_2017_20m_X, y=train_roop_2017_20m_y$swp.class4, rfeControl = rfeControl_nb, sizes = rfesubsets)
+rfe_nb_swp$optVariables
+rfe_nb_swp
+plot(rfe_nb_swp, type=c("g","o"))
+plot(rfe_nb_swp, metric = "Rsquared", type=c("g","o"))
+
+#run bagged trees
+rfe_bt_swp <- rfe(x = train_roop_2017_20m_X, y=train_roop_2017_20m_y$swp, rfeControl = rfeControl_bt, sizes = rfesubsets)
+rfe_bt_swp$optVariables
+rfe_bt_swp
+plot(rfe_bt_swp, type=c("g","o"))
+plot(rfe_bt_swp, metric = "Rsquared", type=c("g","o"))
+
+
+rfe_roop_2017_20m_r <- rfe(x = roop_2017_20m_r[,c(3:56,61,62)], y=roop_2017_20m_r, rfeControl = rfeControl_roop, sizes = rfesubsets, metric = "Rsquared")
+```
+
+#Regression model training 
+##gbm: 
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp as y
+gbmfit_all_swp <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp, trControl = fitControl, method="gbm", verbose=FALSE)
+gbmfit_all_swp$results
+predict(gbmfit_all_swp)
+##test data
+swp_testpred_gbm <- predict(gbmfit_all_swp, newdata = test_roop_2017_20m_X)
+swp_trainpred_gbm <- predict(gbmfit_all_swp)
+cor(swp_testpred_gbm, test_roop_2017_20m_y$swp)^2
+cor(swp_trainpred_gbm, train_roop_2017_20m_y$swp)^2  #overfitting is a big problem
+
+#a data frame to store the result
+df_gbmfit_all_swp <- data.frame("predict"=c(swp_testpred_gbm, swp_trainpred_gbm), "observe"=c(test_roop_2017_20m_y$swp, train_roop_2017_20m_y$swp), "partition"=as.factor(c(rep("test", length(swp_testpred_gbm)), rep("train", length(swp_trainpred_gbm)))))
+
+##predict vs observed
+ggplot(data = df_gbmfit_all_swp, aes(x=observe, y=predict, color=partition))+geom_point()+geom_smooth(method = "lm", aes(y=predict,x=observe), data=df_gbmfit_all_swp)+ggtitle("GBM regression model: swp vs all variables 20m")
+
+##using swp.bs as y
+#gbmfit_all_swpbs <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.bs, trControl = fitControl, method = "gbm")
+#gbmfit_all_swpbs
+
+```
+
+##rf: random forest 
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp as y
+rffit_all_swp <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp, trControl = fitControl, method="rf", verbose=FALSE)
+rffit_all_swp$results
+predict(rffit_all_swp)
+##test data
+swp_testpred_rf <- predict(rffit_all_swp, newdata = test_roop_2017_20m_X)
+swp_trainpred_rf <- predict(rffit_all_swp)
+cor(swp_testpred_rf, test_roop_2017_20m_y$swp)^2
+cor(swp_trainpred_rf, train_roop_2017_20m_y$swp)^2  #overfitting is a big problem
+
+#a data frame to store the result
+df_rffit_all_swp <- data.frame("predict"=c(swp_testpred_rf, swp_trainpred_rf), "observe"=c(test_roop_2017_20m_y$swp, train_roop_2017_20m_y$swp), "partition"=as.factor(c(rep("test", length(swp_testpred_rf)), rep("train", length(swp_trainpred_rf)))))
+
+##predict vs observed
+ggplot(data = df_rffit_all_swp, aes(x=observe, y=predict, color=partition))+geom_point()+geom_smooth(method = "lm", aes(y=predict,x=observe), data=df_rffit_all_swp)+ggtitle("RF regression model: swp vs all variables 20m")
+
+##using swp.bs as y
+#rffit_all_swpbs <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.bs, trControl = fitControl, method = "rf")
+#rffit_all_swpbs
+
+```
+
+##ridge
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp as y
+ridgefit_all_swp <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp, trControl = fitControl, method="ridge", verbose=FALSE)
+ridgefit_all_swp$results
+predict(ridgefit_all_swp)
+##test data
+swp_testpred_ridge <- predict(ridgefit_all_swp, newdata = test_roop_2017_20m_X)
+swp_trainpred_ridge <- predict(ridgefit_all_swp)
+cor(swp_testpred_ridge, test_roop_2017_20m_y$swp)^2
+cor(swp_trainpred_ridge, train_roop_2017_20m_y$swp)^2  #overfitting is a big problem
+
+#a data frame to store the result
+df_ridgefit_all_swp <- data.frame("predict"=c(swp_testpred_ridge, swp_trainpred_ridge), "observe"=c(test_roop_2017_20m_y$swp, train_roop_2017_20m_y$swp), "partition"=as.factor(c(rep("test", length(swp_testpred_ridge)), rep("train", length(swp_trainpred_ridge)))))
+
+##predict vs observed
+ggplot(data = df_ridgefit_all_swp, aes(x=observe, y=predict, color=partition))+geom_point()+geom_smooth(method = "lm", aes(y=predict,x=observe), data=df_ridgefit_all_swp)+ggtitle("Ridge regression model: swp vs all variables 20m")
+
+##using swp.bs as y
+#ridgefit_all_swpbs <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.bs, trControl = fitControl, method = "ridge")
+#ridgefit_all_swpbs
+
+```
+
+##lasso
+```{r}
+#fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp as y
+#lassofit_all_swp <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp, #trControl = fitControl, method="lasso", verbose=FALSE)
+#lassofit_all_swp$results
+#predict(lassofit_all_swp)
+##test data
+#swp_testpred_lasso <- predict(lassofit_all_swp, newdata = test_roop_2017_20m_X)
+#swp_trainpred_lasso <- predict(lassofit_all_swp)
+#cor(swp_testpred_lasso, test_roop_2017_20m_y$swp)^2
+#cor(swp_trainpred_lasso, train_roop_2017_20m_y$swp)^2  #overfitting is a big problem
+
+#a data frame to store the result
+#df_lassofit_all_swp <- data.frame("predict"=c(swp_testpred_lasso, swp_trainpred_lasso), "observe"=c(test_roop_2017_20m_y$swp, train_roop_2017_20m_y$swp), "partition"=as.factor(c(rep("test", length(swp_testpred_lasso)), rep("train", length(swp_trainpred_lasso)))))
+
+##predict vs observed
+#ggplot(data = df_lassofit_all_swp, aes(x=observe, y=predict, color=partition))+geom_point()+geom_smooth(method = "lm", aes(y=predict,x=observe), data=df_lassofit_all_swp)+ggtitle("Lasso regression model: swp vs all variables 20m")
+
+##using swp.bs as y
+#lassofit_all_swpbs <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.bs, trControl = fitControl, method = "lasso")
+#lassofit_all_swpbs
+
+```
+
+##Principal Component Regression
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp as y
+pcrfit_all_swp <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp, trControl = fitControl, method="pcr", verbose=FALSE)
+pcrfit_all_swp$results
+predict(pcrfit_all_swp)
+##test data
+swp_testpred_pcr <- predict(pcrfit_all_swp, newdata = test_roop_2017_20m_X)
+swp_trainpred_pcr <- predict(pcrfit_all_swp)
+cor(swp_testpred_pcr, test_roop_2017_20m_y$swp)^2
+cor(swp_trainpred_pcr, train_roop_2017_20m_y$swp)^2  #overfitting is a big problem
+
+#a data frame to store the result
+df_pcrfit_all_swp <- data.frame("predict"=c(swp_testpred_pcr, swp_trainpred_pcr), "observe"=c(test_roop_2017_20m_y$swp, train_roop_2017_20m_y$swp), "partition"=as.factor(c(rep("test", length(swp_testpred_pcr)), rep("train", length(swp_trainpred_pcr)))))
+
+##predict vs observed
+ggplot(data = df_pcrfit_all_swp, aes(x=observe, y=predict, color=partition))+geom_point()+geom_smooth(method = "lm", aes(y=predict,x=observe), data=df_pcrfit_all_swp)+ggtitle("pcr regression model: swp vs all variables 20m")
+
+##using swp.bs as y
+#pcrfit_all_swpbs <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.bs, trControl = fitControl, method = "pcr")
+#pcrfit_all_swpbs
+
+```
+
+##Linear Regression
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp as y
+lmfit_all_swp <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp, trControl = fitControl, method="lm", verbose=FALSE)
+lmfit_all_swp$results
+predict(lmfit_all_swp)
+##test data
+swp_testpred_lm <- predict(lmfit_all_swp, newdata = test_roop_2017_20m_X)
+swp_trainpred_lm <- predict(lmfit_all_swp)
+cor(swp_testpred_lm, test_roop_2017_20m_y$swp)^2
+cor(swp_trainpred_lm, train_roop_2017_20m_y$swp)^2  #overfitting is a big problem
+
+#a data frame to store the result
+df_lmfit_all_swp <- data.frame("predict"=c(swp_testpred_lm, swp_trainpred_lm), "observe"=c(test_roop_2017_20m_y$swp, train_roop_2017_20m_y$swp), "partition"=as.factor(c(rep("test", length(swp_testpred_lm)), rep("train", length(swp_trainpred_lm)))))
+
+##predict vs observed
+ggplot(data = df_lmfit_all_swp, aes(x=observe, y=predict, color=partition))+geom_point()+geom_smooth(method = "lm", aes(y=predict,x=observe), data=df_lmfit_all_swp)+ggtitle("lm regression model: swp vs all variables 20m")
+
+##using swp.bs as y
+#lmfit_all_swpbs <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.bs, trControl = fitControl, method = "lm")
+#lmfit_all_swpbs
+
+```
+
+#Classification model training
+##random forest classification
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp.class4 as y
+rffit_all_swpclass4 <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.class4, trControl = fitControl, method="rf", verbose=FALSE)
+rffit_all_swpclass4
+
+swpclass4_testpred_rf <- predict(rffit_all_swpclass4, newdata = test_roop_2017_20m_X)
+swpclass4_trainpred_rf <- predict(rffit_all_swpclass4, newdata = train_roop_2017_20m_X)
+
+confusionMatrix(swpclass4_testpred_rf, test_roop_2017_20m_y$swp.class4)
+confusionMatrix(swpclass4_trainpred_rf, train_roop_2017_20m_y$swp.class4)
+```
+
+##gbm
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp.class4 as y
+gbmfit_all_swpclass4 <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.class4, trControl = fitControl, method="gbm", verbose=FALSE)
+gbmfit_all_swpclass4
+
+swpclass4_testpred_gbm <- predict(gbmfit_all_swpclass4, newdata = test_roop_2017_20m_X)
+swpclass4_trainpred_gbm <- predict(gbmfit_all_swpclass4, newdata = train_roop_2017_20m_X)
+
+confusionMatrix(swpclass4_testpred_gbm, test_roop_2017_20m_y$swp.class4)
+confusionMatrix(swpclass4_trainpred_gbm, train_roop_2017_20m_y$swp.class4)
+
+```
+
+##lda
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp.class4 as y
+ldafit_all_swpclass4 <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.class4, trControl = fitControl, method="lda", verbose=FALSE)
+ldafit_all_swpclass4
+
+swpclass4_testpred_lda <- predict(ldafit_all_swpclass4, newdata = test_roop_2017_20m_X)
+swpclass4_trainpred_lda <- predict(ldafit_all_swpclass4, newdata = train_roop_2017_20m_X)
+
+confusionMatrix(swpclass4_testpred_lda, test_roop_2017_20m_y$swp.class4)
+confusionMatrix(swpclass4_trainpred_lda, train_roop_2017_20m_y$swp.class4)
+
+```
+
+##svm with linear kernel
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp.class4 as y
+svmLinearfit_all_swpclass4 <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.class4, trControl = fitControl, method="svmLinear", verbose=FALSE)
+svmLinearfit_all_swpclass4
+
+swpclass4_testpred_svmLinear <- predict(svmLinearfit_all_swpclass4, newdata = test_roop_2017_20m_X)
+swpclass4_trainpred_svmLinear <- predict(svmLinearfit_all_swpclass4, newdata = train_roop_2017_20m_X)
+
+confusionMatrix(swpclass4_testpred_svmLinear, test_roop_2017_20m_y$swp.class4)
+confusionMatrix(swpclass4_trainpred_svmLinear, train_roop_2017_20m_y$swp.class4)
+
+```
+
+##svm with polynomial kernel
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp.class4 as y
+svmPolyfit_all_swpclass4 <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.class4, trControl = fitControl, method="svmPoly", verbose=FALSE)
+svmPolyfit_all_swpclass4
+
+swpclass4_testpred_svmPoly <- predict(svmPolyfit_all_swpclass4, newdata = test_roop_2017_20m_X)
+swpclass4_trainpred_svmPoly <- predict(svmPolyfit_all_swpclass4, newdata = train_roop_2017_20m_X)
+
+confusionMatrix(swpclass4_testpred_svmPoly, test_roop_2017_20m_y$swp.class4)
+confusionMatrix(swpclass4_trainpred_svmPoly, train_roop_2017_20m_y$swp.class4)
+
+```
+
+##neural network for classification
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+#using all variables
+##using swp as y
+nnetfit_all_swp <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp, trControl = fitControl, method="mxnet", verbose=FALSE)
+predict(nnetfit_all_swp)
+##test data
+swp_testpred_nnet <- predict(nnetfit_all_swp, newdata = test_roop_2017_20m_X)
+swp_trainpred_nnet <- predict(nnetfit_all_swp)
+cor(swp_testpred_nnet, test_roop_2017_20m_y$swp)^2
+cor(swp_trainpred_nnet, train_roop_2017_20m_y$swp)^2  #overfitting is a big problem
+
+#a data frame to store the result
+df_nnetfit_all_swp <- data.frame("predict"=c(swp_testpred_nnet, swp_trainpred_nnet), "observe"=c(test_roop_2017_20m_y$swp, train_roop_2017_20m_y$swp), "partition"=as.factor(c(rep("test", length(swp_testpred_nnet)), rep("train", length(swp_trainpred_nnet)))))
+
+##predict vs observed
+ggplot(data = df_nnetfit_all_swp, aes(x=observe, y=predict, color=partition))+geom_point()+geom_smooth(method = "nnet", aes(y=predict,x=observe), data=df_nnetfit_all_swp)+ggtitle("nnet regression model: swp vs all variables 20m")
+
+##using swp.bs as y
+#nnetfit_all_swpbs <- train(x = train_roop_2017_20m_X, y = train_roop_2017_20m_y$swp.bs, trControl = fitControl, method = "nnet")
+#nnetfit_all_swpbs
+```
+
+##function to save the trained model
+```{r}
+save(model, file = "model.Rdata")
+#or
+saveRDS(finalmodel, "./finalmodel.rds")
+```
+
+#things that need to be considered 
+- whether or not normalize data
+- whether the order of rows will influence the resuls
+- swp.bs
+- different functions in rfeControl: rfFuncs, lmFuncs, etc.
+https://www.r-bloggers.com/what-are-the-best-machine-learning-packages-in-r/
+https://www.analyticsvidhya.com/blog/2016/12/practical-guide-to-implement-machine-learning-with-caret-package-in-r-with-practice-problem/
