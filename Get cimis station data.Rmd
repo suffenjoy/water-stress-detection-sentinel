@@ -67,7 +67,6 @@ names(cimis_summer)[8:10] <- c("temp","humid","wind")
 str(cimis_summer)
 ```
 
-
 ##extract the dates and hours we need 
 ```{r}
 cimis_5th_2017 <- dplyr::filter(cimis_summer, between(Hour, 12, 14), Date %in% swp_5theast_2017$Date)
@@ -78,6 +77,14 @@ cimis_roop_2017
 cimis_roop_2016
 cimis_roop_2017_match 
 
+```
+
+##calculate daily average 
+```{r}
+#select only the noon time
+cimis_summer_noon <- dplyr::filter(cimis_summer, between(Hour, 12, 14))
+#calculate daily average during the noon time 
+cimis_summer_ave <- aggregate(x=cimis_summer_noon[8:10], by = list(Date = cimis_summer_noon$Date), FUN = mean)
 ```
 
 It's notable that the maximum data limit is 1750 records, so you have to send multiple request and then combine multiple data frame together. 
