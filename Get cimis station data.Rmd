@@ -1,0 +1,90 @@
+---
+title: "Get hourly cimis station data"
+author: "Zhehan Tang"
+date: "February 2, 2018"
+output: html_document
+---
+
+#Using Rcimis package to get data
+
+##load the package
+```{r}
+library(Rcimis)
+library(dplyr)
+```
+
+## Find the target station
+```{r}
+#Roop ranch walnut orchard
+##according to the report from Allan, the Roop Ranch uses the data from Gerber South #222
+
+#C1 walnut orchard
+#cimis_C1 <- getDists(lat=39.963, lon=-122.273, n=4)
+
+#5th avenue walnut orchard
+#cimis_5th <- getDists(lat = 40.07, lon=-122.103, n=5)
+
+```
+
+
+##Request data by using CIMISweather function 
+### Available dataItems: http://et.water.ca.gov/Rest/Index
+Some useful dataItems
+- hly-air-tmp: hourly air temperature
+- hly-rel-hum: hourly relative humidity
+- hly-eto: hourly CIMIS ETo
+- hly-sol-rad: hourly solar radiation
+- hly-vap-pres: hourly vapor pressure
+- hly-net-rad: hourly net radiation
+- hly-wind-spd: hourly wind speed
+
+```{r}
+cimis_May <- CIMISweather(startDate = "2017-05-01", endDate = "2017-05-31", targets = 222, dataItems = c("hly-air-tmp","hly-wind-spd", "hly-rel-hum"), appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+
+cimis_June <- CIMISweather(startDate = "2017-06-01", endDate = "2017-06-30", targets = 222, dataItems = c("hly-air-tmp","hly-wind-spd", "hly-rel-hum"), appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+
+cimis_July <- CIMISweather(startDate = "2017-07-01", endDate = "2017-07-31", targets = 222, dataItems = c("hly-air-tmp","hly-wind-spd", "hly-rel-hum"), appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+
+cimis_Aug <- CIMISweather(startDate = "2017-08-01", endDate = "2017-08-31", targets = 222, dataItems = c("hly-air-tmp","hly-wind-spd", "hly-rel-hum"), appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+
+cimis_Sept <- CIMISweather(startDate = "2017-09-01", endDate = "2017-09-30", targets = 222, dataItems = c("hly-air-tmp","hly-wind-spd", "hly-rel-hum"), appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+
+cimis_Oct <- CIMISweather(startDate = "2017-10-01", endDate = "2017-10-31", targets = 222, dataItems = c("hly-air-tmp","hly-wind-spd", "hly-rel-hum"), appKey = "b6620499-260c-4f4a-af1f-14a941f9c115")
+
+#combine them together
+cimis_summer <- rbind(cimis_May, cimis_June, cimis_July, cimis_Aug, cimis_Sept, cimis_Oct)
+
+#change the data type of the columns
+cimis_summer$Date <- as.Date(cimis_summer$Date)
+cimis_summer$Julian <- as.integer(cimis_summer$Julian)
+cimis_summer$Hour <- as.numeric(cimis_summer$Hour)/100 #change to 1-24
+#air temperature; relative humidity; wind speed
+cimis_summer[,8:10] <- sapply(cimis_summer[,8:10], as.numeric)
+
+#change the column name of the data frame 
+names(cimis_summer)[8:10] <- c("temp","humid","wind")
+#have a check 
+str(cimis_summer)
+```
+
+
+##extract the dates and hours we need 
+```{r}
+cimis_5th_2017 <- dplyr::filter(cimis_summer, between(Hour, 12, 14), Date %in% swp_5theast_2017$Date)
+cimis_C1_2017 
+cimis_5th_2016 
+cimis_5th_2017
+cimis_roop_2017
+cimis_roop_2016
+cimis_roop_2017_match 
+
+```
+
+It's notable that the maximum data limit is 1750 records, so you have to send multiple request and then combine multiple data frame together. 
+1750/24 = 72.9. Therefore, if you want to have only one type of data, you can request for about two and half months. 
+
+#Using API directly
+Input the request directly in the browser. 
+## Example of a request: 
+http://et.water.ca.gov/api/data?appKey=b6620499-260c-4f4a-af1f-14a941f9c115&targets=5&startDate=2017-05-01&endDate=2017-06-01&dataItems=hly-air-tmp,%20hly-rel-hum,%20hly-eto&unitOfMeasure=M;prioritizeSCS=N 
+
