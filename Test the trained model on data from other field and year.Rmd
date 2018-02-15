@@ -1,0 +1,69 @@
+---
+title: "Test the trained model"
+author: "Zhehan Tang"
+date: "February 8, 2018"
+output: html_document
+---
+#package preparation 
+```{r}
+library(leaps)
+library(caret)
+library(car)
+library(MASS)
+library(dplyr)
+library(gbm)
+library(lars)
+library(pls)
+library(ggplot2)
+
+```
+
+#read csv
+```{r}
+path_output <- "G:/CITRIS Project/Results"
+wal5th_2017_20m <- read.csv(file.path(path_output, "wal5th_2017_20m.csv"))
+walC1_2017_20m <- read.csv(file.path(path_output, "walC1_2017_20m.csv"))
+
+#change data type
+##add a column called orchard
+wal5th_2017_20m$orchard <- "5th"
+walC1_2017_20m$orchard <- "C1"
+```
+
+#preprocessing
+```{r}
+#split x and y
+C15th_2017_20m_X <- rbind(wal5th_2017_20m[,c(3:56,58,59)], walC1_2017_20m[,c(2:55,59,60)])
+#include date and orchard 
+C15th_2017_20m_y <- data.frame("orchard" = c(wal5th_2017_20m$orchard, walC1_2017_20m$orchard), "Date" = c(wal5th_2017_20m$Date, walC1_2017_20m$Date), "swp"=c(wal5th_2017_20m$swp, walC1_2017_20m$swp), "swp.class4" = swp_classification(c(wal5th_2017_20m$swp, walC1_2017_20m$swp)))
+
+#normalize data
+C15th_2017_20m_X_norm <- predict(preProcess(C15th_2017_20m_X, method = c("center","scale")), newdata = C15th_2017_20m_X)
+
+```
+
+#test regression model 
+```{r}
+pred_C15th_2017_20m <- predict(rffit_all_swp, newdata = C15th_2017_20m_X_norm)
+result_C15th_2017_20m <- data.frame("orchard" = C15th_2017_20m_y$orchard, "Date" = C15th_2017_20m_y$Date, "predict" = pred_C15th_2017_20m, "observe" = C15th_2017_20m_y$swp)
+
+#predict vs  observed
+ggplot(data = result_C15th_2017_20m, aes(x = observe, y = predict, color = orchard)) + geom_point() + geom_smooth(method = 'lm',se = FALSE) + xlim(-8, -3) + ylim(-8, -3)
+##R^2 of all
+cor(result_C15th_2017_20m$predict, result_C15th_2017_20m$observe)^2
+##R^2 of 5th only 
+cor(result_C15th_2017_20m[result_C15th_2017_20m$orchard == "5th",]$predict, result_C15th_2017_20m[result_C15th_2017_20m$orchard == "5th",]$observe)^2
+##R^2 of C1 only
+cor(result_C15th_2017_20m[result_C15th_2017_20m$orchard == "C1",]$predict, result_C15th_2017_20m[result_C15th_2017_20m$orchard == "C1",]$observe)^2
+
+```
+
+#test classification model
+```{r}
+pred.class4_C15th_2017_20m <- predict(svmLinearfit_all_swpclass4, newdata = C15th_2017_20m_X_norm)
+result.class4_C15th_2017_20m <- data.frame("orchard" = C15th_2017_20m_y$orchard, "Date" = C15th_2017_20m_y$Date, "predict" = pred.class4_C15th_2017_20m, "observe" = C15th_2017_20m_y$swp.class4)
+
+#predict vs observed
+confusionMatrix(result.class4_C15th_2017_20m$predict, result.class4_C15th_2017_20m$observe)
+```
+
