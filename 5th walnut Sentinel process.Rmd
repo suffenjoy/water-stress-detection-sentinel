@@ -26,10 +26,20 @@ swp_5theast_2017$Date <- as.Date.character(swp_5theast_2017$Date, format = "%d-%
 swp_5thwest_2016$Date <- as.Date.character(swp_5thwest_2016$Date, format = "%d-%b-%y")
 swp_5thwest_2017$Date <- as.Date.character(swp_5thwest_2017$Date, format = "%d-%b-%y")
 
+#add ID column 
+swp_5theast_2017$ID <- "5th_east"
+swp_5thwest_2017$ID <- "5th_west"
+swp_5theast_2016$ID <- "5th_east"
+swp_5thwest_2016$ID <- "5th_west"
+
+#combine east and west 
+swp_5th_2017 <- rbind(swp_5theast_2017, swp_5thwest_2017)
+swp_5th_2017 <- swp_5th_2017[order(swp_5th_2017$Date),]
 ```
 
 #histogram of the swp distribution 
 ```{r}
+#dev.off()
 par(mfrow=c(2,2))
 hist(swp_5theast_2016$Avg)
 hist(swp_5thwest_2016$Avg)
@@ -63,44 +73,61 @@ read_sentinel <- function(path, sentinel_image){
 ```{r}
 path_wal_sen <- "G:/CITRIS Project/Walnut_sentinel"
 
-sen_5th_20170704 <- read_sentinel(path_wal_sen, "20170704_5th_10m_nearest.tif")
-sen_5th_20170915 <- read_sentinel(path_wal_sen, "20170915_5th_10m_nearest.tif")
-sen_5th_20170922 <- read_sentinel(path_wal_sen, "20170922_5th_10m_nearest.tif")
-sen_5th_20171017 <- read_sentinel(path_wal_sen, "20171017_5th_10m_nearest.tif")
+wal5th_20170704_20m <- read_sentinel(path_wal_sen, "20170704_5th_20m_mean.tif")
+wal5th_20170915_20m <- read_sentinel(path_wal_sen, "20170915_5th_20m_mean.tif")
+wal5th_20170922_20m <- read_sentinel(path_wal_sen, "20170922_5th_20m_mean.tif")
+wal5th_20171017_20m <- read_sentinel(path_wal_sen, "20171017_5th_20m_mean.tif")
 
-sen_5th_list <- list("20170704"=sen_5th_20170704, "20170915"=sen_5th_20170915, "20170922"=sen_5th_20170922, "20171017"=sen_5th_20171017)
+wal5th_list <- list("20170704"=wal5th_20170704_20m, "20170915"=wal5th_20170915_20m, "20170922"=wal5th_20170922_20m, "20171017"=wal5th_20171017_20m)
 ```
 
 #Read the shapefile of site boundary and swp tree
 ```{r}
 path_boundary <- "G:/CITRIS Project/site locations/Shapefiles"
-boundary_5th <- shapefile(file.path(path_boundary, "5th_walnut_boundary.shp"))
-tree_5th <- shapefile(file.path(path_boundary,"5th_walnut.shp"))
+wal5th_boundary <- shapefile(file.path(path_boundary, "5th_walnut_boundary.shp"))
+wal5th_tree <- shapefile(file.path(path_boundary,"5th_walnut.shp"))
 
 #unify the crs
-boundary_5th <- spTransform(boundary_5th, crs(sen_5th_20170704))
-tree_5th <- spTransform(tree_5th, crs(sen_5th_20170704))
+wal5th_boundary <- spTransform(wal5th_boundary, crs(wal5th_20170704_20m))
+wal5th_tree <- spTransform(wal5th_tree, crs(wal5th_20170704_20m))
 
 #change the name of shapefiles
-boundary_5th$Name = "5th_walnut"
+wal5th_boundary$Name <- "5th_walnut"
+wal5th_tree$Name <- c("5th_east","5th_west")
 
 #remove extra dimension of coordinate system
-tree_5th@coords <- tree_5th@coords[,1:2]
+wal5th_tree@coords <- wal5th_tree@coords[,1:2]
 
 #subset the east and west tree
-east_5th <- tree_5th[tree_5th$Name=="5th east",]
-west_5th <- tree_5th[tree_5th$Name=="5th west",]
-east_5th$Name <- "5th_east"
-west_5th$Name <- "5th_west"
+wal5th_treeeast <- wal5th_tree[wal5th_tree$Name=="5th_east",]
+wal5th_treewest <- wal5th_tree[wal5th_tree$Name=="5th_west",]
 
-dev.off()
-plotRGB(sen_5th_20170704, 3,2,1, stretch="lin")
-plot(boundary_5th, add = TRUE, col="white")
-plot(east_5th, add = TRUE, col="black")
-plot(west_5th, add = TRUE, col="red")
-dev.off()
 ```
 
+#Preview the images 
+```{r}
+dev.off()
+plotRGB(wal5th_20170704_20m, 8,3,2, stretch="hist")
+plot(wal5th_boundary, add = TRUE, border="white")
+plot(wal5th_treeeast, add = TRUE, col="yellow")
+plot(wal5th_treewest, add = TRUE, col="red")
+
+plotRGB(wal5th_20170915_20m, 8,3,2, stretch="hist")
+plot(wal5th_boundary, add = TRUE, border="white")
+plot(wal5th_treeeast, add = TRUE, col="yellow")
+plot(wal5th_treewest, add = TRUE, col="red")
+
+plotRGB(wal5th_20170922_20m, 8,3,2, stretch="hist")
+plot(wal5th_boundary, add = TRUE, border="white")
+plot(wal5th_treeeast, add = TRUE, col="yellow")
+plot(wal5th_treewest, add = TRUE, col="red")
+
+plotRGB(wal5th_20171017_20m, 8,3,2, stretch="hist")
+plot(wal5th_boundary, add = TRUE, border="white")
+plot(wal5th_treeeast, add = TRUE, col="yellow")
+plot(wal5th_treewest, add = TRUE, col="red")
+
+```
 
 # The function to extract values of the trees 
 - Also test two different extract methods: simple and bilinear. If 'simple' values for the cell a point falls in are returned. If 'bilinear' the returned values are interpolated from the values of the four nearest raster cells.
@@ -130,7 +157,7 @@ extract_sen <- function(sentinel_list, locations, method, fun){
 
 #Extract reflectance values of the locations
 ```{r}
-walsen_5th_sim <- extract_sen(sen_5th_list, tree_5th, method="simple", fun = mean)
+walsen_5th_sim <- extract_sen(wal5th_list, wal5th_tree, method="simple", fun = mean)
 ```
 
 #Vegetation indices functions
@@ -428,17 +455,17 @@ sccci.3 <- function(sentinel){
 
 #NDVI for the entire field overtime
 ```{r}
-walsen_5th_ndvi_list <- lapply(sen_5th_list, ndvi)
+walsen_5th_ndvi_list <- lapply(wal5th_list, ndvi)
 
 dev.off()
 par(mfrow=c(2,2))
 for(i in 1:4){
-  hist(raster::mask(walsen_5th_ndvi_list[[i]],boundary_5th), main=paste(names(walsen_5th_ndvi_list)[i],"NDVI of the field"),xlab="")
+  hist(raster::mask(walsen_5th_ndvi_list[[i]],wal5th_boundary), main=paste(names(walsen_5th_ndvi_list)[i],"NDVI of the field"),xlab="")
 }
 
 par(mfrow=c(1,1))
-sapply(walsen_5th_ndvi_list, function(x) extract(x,y=boundary_5th, fun=mean))
-sapply(walsen_5th_ndvi_list, function(x) extract(x,y=boundary_5th, fun=median))
+sapply(walsen_5th_ndvi_list, function(x) extract(x,y=wal5th_boundary, fun=mean))
+sapply(walsen_5th_ndvi_list, function(x) extract(x,y=wal5th_boundary, fun=median))
 
 ```
 
@@ -547,37 +574,64 @@ df_reflectance <- function(locations_method){
 
 #Use of df_reflectance function to calculate vegetation index
 ```{r}
-df_walsen_5th_sim <- df_reflectance(walsen_5th_sim)
+df_wal5th_20m <- df_reflectance(walsen_5th_sim)
 ```
 
 #integrate with swp data
 ```{r}
+swp_wal5th_20m <- vector("list", length(df_wal5th_20m))
+names(swp_wal5th_20m) <- names(df_wal5th_20m)
+
+for(i in 1:length(swp_wal5th_20m)){
+  #match the dates
+  swp_select <- swp_5th_2017[swp_5th_2017$Date == names(df_wal5th_20m)[i],c(1,3,5)]
+  names(swp_select)[2] <- "swp"
+  #merge two data frame
+  swp_wal5th_20m[[i]] <- merge(df_wal5th_20m[[i]], swp_select, by = "ID")
+}
+```
+
+#integrate with weather data
+```{r}
+#read cimis weather data
+path_weather <- "G:/CITRIS Project/Walnut_weather"
+cimis_weather_2017 <- read.csv(file.path(path_weather, "GerberSouth_2017_temp_humid_wind.csv"), header = TRUE)
+cimis_weather_2017$Date <- as.Date(cimis_weather_2017$Date)
+
+#filter with C1 at matched dates
+weather_5th_2017 <-  dplyr::filter(cimis_weather_2017, Date %in% as.Date(names(swp_wal5th_20m)), between(Hour, 13, 14))
+
+#calculate daily average during the noon time 
+weather_5th_2017 <- aggregate(x = weather_5th_2017[,c("temp","humid","wind")], by = list(Date = weather_5th_2017$Date), FUN = mean)
+
+#integration
+swpweather_wal5th_20m <- vector("list", length(swp_wal5th_20m))
+names(swpweather_wal5th_20m) <- names(swp_wal5th_20m)
+
+for(i in 1:length(swp_wal5th_20m)){
+  weather_select <- weather_5th_2017[weather_5th_2017$Date == names(swp_wal5th_20m)[i],]
+  swpweather_wal5th_20m[[i]] <- merge(swp_wal5th_20m[[i]], weather_select, by = "Date") 
+}
 
 ```
 
-##integrate_swp function
+##VPD: vapour pressure deficit
 ```{r}
-integrate_swp <- function(df_locations_method, locations){
-  if (locations == "points"){
-    locations_method_select <- list()
-    for(i in 1:length(df_locations_method)){
-      #match the date
-      swp_select <- swp_sen_datelist[[which(names(swp_sen_datelist) == names(df_locations_method)[i])]]
-      #merge two data frame
-      locations_method_select[[i]] <- merge(df_locations_method[[i]], swp_select, by = "ID", sort = TRUE)
-    }
-  }
-  else if(locations == "centers" | locations == "blocks"){
-    locations_method_select <- list()
-    for(i in 1:length(df_locations_method)){
-      #match the date with swp.ave_sen_datelist
-      swp_select <- swp.ave_sen_datelist[[which(names(swp.ave_sen_datelist) == names(df_locations_method)[i])]]
-      #merge two data frame
-      locations_method_select[[i]] <- merge(df_locations_method[[i]], swp_select, by = "ID", sort = TRUE)
-    }
-  }
-  names(locations_method_select) <- names(df_locations_method)
-  return(locations_method_select)
+for(i in 1:length(swpweather_wal5th_20m)){
+  swpweather_wal5th_20m[[i]]$vpd <- RHtoVPD(RH = swpweather_wal5th_20m[[i]]$humid, TdegC = (swpweather_wal5th_20m[[i]]$temp-32)*5/9)
 }
+
+```
+
+
+#create a big data frame
+```{r}
+#combine the sublists
+wal5th_2017_20m <- do.call(rbind, swpweather_wal5th_20m)
+
+#output the csv
+path_output <- "G:/CITRIS Project/Results"
+write.csv(wal5th_2017_20m, file = file.path(path_output, "wal5th_2017_20m.csv"), row.names = FALSE)
+
 ```
 

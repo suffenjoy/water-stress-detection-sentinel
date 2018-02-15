@@ -15,6 +15,7 @@ library(plyr)
 library(rgeos)
 library(rgdal)
 library(hsdar)
+library(plantecophys)
 ```
 
 
@@ -209,7 +210,7 @@ plot(wal_blocks, add=TRUE, alpha=0.1, border="white")
 ```
 
 # The function to extract values of the centers and their 10m buffer
-- Also test two different extract methods: simple and bilinear. If 'simple' values for the cell a point falls in are returned. If 'bilinear' the returned values are interpolated from the values of the four nearest raster cells.
+- Also test two diffevalues for the cell a point falls in are returned. If 'bilinear' the returned values are interpolated from the values of the four nearest raster cells.rent extract methods: simple and bilinear. If 'simple' 
 ```{r}
 extract_sen <- function(sentinel_list, locations, method, fun){
   #sentinel_list: it is the list to store all sentinel rasterbrick
@@ -703,7 +704,8 @@ swp_roop_20m <- integrate_swp(df_roop_20m, locations = "centers")
 
 ```
 
-##integration of weather data
+#Integration of weather data
+##Relative humidity and air temperature
 ```{r}
 #path_weather <- "C:/Users/tangz/Box Sync/Zhehan/sentinel water stress detection"
 path_weather <- "G:/CITRIS Project/Walnut_weather"
@@ -724,6 +726,15 @@ for(i in 1:length(swp_roop_20m)){
 
 ```
 
+##VPD: vapour pressure deficit
+```{r}
+for(i in 1:length(swp_roop_20m)){
+  swp_roop_20m[[i]]$vpd <- RHtoVPD(RH = swp_roop_20m[[i]]$humid, TdegC = (swp_roop_20m[[i]]$temp-32)*5/9)
+}
+
+```
+
+
 #create a big data frame and output the csv
 ```{r}
 #combine the sublists
@@ -732,10 +743,11 @@ rownames(roop_2017_20m) <- NULL
 
 #output the csv
 path_output <- "G:/CITRIS Project/Results"
-write.csv(roop_2017_20m, file = file.path(path_output, "roop_2017_20m.csv"), col.names = TRUE, row.names = FALSE)
+write.csv(roop_2017_20m, file = file.path(path_output, "roop_2017_20m.csv"), row.names = FALSE)
 
 
 ```
+
 
 
 #Spectral unmixing 
