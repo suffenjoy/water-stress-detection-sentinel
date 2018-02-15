@@ -13,8 +13,8 @@ library(MASS)
 library(dplyr)
 library(gbm)
 library(lars)
-library(elsticnet)
 library(pls)
+library(ggplot2)
 ```
 
 #read csv
@@ -61,7 +61,7 @@ set.seed(777)
 roop_2017_20m_r <- roop_2017_20m[sample(nrow(roop_2017_20m)),]
 
 #split X and y
-roop_2017_20m_X <- roop_2017_20m_r[,c(3:56,61,62)]
+roop_2017_20m_X <- roop_2017_20m_r[,c(3:56,61:63)]
 roop_2017_20m_y <- roop_2017_20m_r[,c(59,60)]
 roop_2017_20m_y$swp.class4 <- swp_classification(roop_2017_20m_y$swp)
 roop_2017_20m_y$swp.class3 <- swp_classification.2(roop_2017_20m_y$swp)
@@ -82,17 +82,46 @@ test_roop_2017_20m_y <- roop_2017_20m_y[-trainIndex,]
 
 #Correlation with swp or swp.bs
 ```{r}
+#use original dataset 
 #p-value of correlation with swp
-p_roop_2017_20m <- apply(roop_2017_20m[,c(3:56,61,62)],2,function(x) anova(lm(roop_2017_20m$swp~x))$`Pr(>F)`[1])
+p_roop_2017_20m <- apply(roop_2017_20m[,c(3:56,61:63)],2,function(x) anova(lm(roop_2017_20m$swp~x))$`Pr(>F)`[1])
 #r-square of correlation with swp
-r_roop_2017_20m <- apply(roop_2017_20m[,c(3:56,61,62)],2,function(x) summary(lm(roop_2017_20m$swp~x))$r.squared)
+r_roop_2017_20m <- apply(roop_2017_20m[,c(3:56,61,63)],2,function(x) summary(lm(roop_2017_20m$swp~x))$r.squared)
 
-p_roop_2017_20m.bs <- apply(roop_2017_20m[,c(3:56,61,62)],2,function(x) anova(lm(roop_2017_20m$swp.bs~x))$`Pr(>F)`[1])
+p_roop_2017_20m.bs <- apply(roop_2017_20m[,c(3:56,61,63)],2,function(x) anova(lm(roop_2017_20m$swp.bs~x))$`Pr(>F)`[1])
 #r-square of correlation with swp
-r_roop_2017_20m.bs <- apply(roop_2017_20m[,c(3:56,61,62)],2,function(x) summary(lm(roop_2017_20m$swp.bs~x))$r.squared)
+r_roop_2017_20m.bs <- apply(roop_2017_20m[,c(3:56,61,63)],2,function(x) summary(lm(roop_2017_20m$swp.bs~x))$r.squared)
 
 sort(r_roop_2017_20m)
 sort(r_roop_2017_20m.bs)
+
+#use normalized dataset 
+#p-value of correlation with swp
+p_roop_2017_20m_norm <- apply(roop_2017_20m_X_norm,2,function(x) anova(lm(roop_2017_20m$swp~x))$`Pr(>F)`[1])
+#r-square of correlation with swp
+r_roop_2017_20m_norm <- apply(roop_2017_20m_X_norm,2,function(x) summary(lm(roop_2017_20m$swp~x))$r.squared)
+
+p_roop_2017_20m_norm.bs <- apply(roop_2017_20m_X_norm,2,function(x) anova(lm(roop_2017_20m$swp.bs~x))$`Pr(>F)`[1])
+#r-square of correlation with swp
+r_roop_2017_20m_norm.bs <- apply(roop_2017_20m_X_norm,2,function(x) summary(lm(roop_2017_20m$swp.bs~x))$r.squared)
+
+sort(r_roop_2017_20m_norm)
+sort(r_roop_2017_20m_norm.bs)
+```
+
+#SWP vs sccci.1; SWP vs vpd; SWP vs REP; swp vs gndvi
+```{r}
+#swp vs sccci.1
+ggplot(data = roop_2017_20m, aes(y=swp,x=sccci.1)) + geom_point(aes(color = as.factor(date))) + geom_smooth(method = "lm")# + geom_smooth(method = "lm", aes(color = as.factor(date)), se = FALSE)
+
+#swp vs VPD
+ggplot(data = roop_2017_20m, aes(y=swp,x=vpd)) + geom_point(aes(color = as.factor(date))) + geom_smooth(method = "lm") 
+
+#swp vs REP
+ggplot(data = roop_2017_20m, aes(y=swp,x=REP)) + geom_point(aes(color = as.factor(date))) + geom_smooth(method = "lm") #+ geom_smooth(method = "lm", aes(color = as.factor(date)), se = FALSE)
+
+#swp vs gndvi
+ggplot(data = roop_2017_20m, aes(y=swp,x=gndvi)) + geom_point(aes(color = as.factor(date))) + geom_smooth(method = "lm") + geom_smooth(method = "lm", aes(color = as.factor(date)), se = FALSE)
 ```
 
 #Feature selection by using rfe (recursive feature elimination) in caret package
@@ -418,11 +447,21 @@ ggplot(data = df_nnetfit_all_swp, aes(x=observe, y=predict, color=partition))+ge
 #nnetfit_all_swpbs
 ```
 
-##function to save the trained model
+
+#function to save the trained model
 ```{r}
-save(model, file = "model.Rdata")
+path_output <- "G:/CITRIS Project/Results"
+
+#among the regression models that I tried, random forest regression model has the best performance 
+saveRDS(rffit_all_swp, file = file.path(path_output, "rf_regression_model.rds"))
+save(rffit_all_swp, file = file.path(path_output, "rf_regression_model.Rdata"))
+
+#among the classification models that I tried, svm with linear kernel has the best performance
+save(svmLinearfit_all_swpclass4, file = file.path(path_output, "svmlinear_class4_model.Rdata"))
+
+#save(model, file = "model.Rdata")
 #or
-saveRDS(finalmodel, "./finalmodel.rds")
+#saveRDS(finalmodel, "./finalmodel.rds")
 ```
 
 #things that need to be considered 
