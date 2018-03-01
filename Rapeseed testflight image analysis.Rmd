@@ -1,0 +1,90 @@
+---
+title: "Rapeseed testflight image analysis"
+author: "Zhehan Tang"
+date: "February 28, 2018"
+output: html_document
+---
+
+#package preparation
+```{r}
+library(itcSegment)
+library(raster)
+```
+
+#Read 2D raster images
+
+##functions to read uav data
+```{r}
+read_uav <- function(path, red, green, blue, rededge, nir){
+  #read raster layer
+  uav_red <- raster(file.path(path, red))
+  uav_green <- raster(file.path(path, green))
+  uav_blue <- raster(file.path(path, blue))
+  uav_rededge <- raster(file.path(path, rededge))
+  uav_nir <- raster(file.path(path, nir))
+  
+  #brick the 5 bands 
+  uav_brick <- brick(stack(uav_blue, uav_green, uav_red, uav_rededge, uav_nir))
+  
+  #rename the bands
+  names(uav_brick) <- c("blue","green","red","rededge","nir")
+  
+  return(uav_brick)
+}
+```
+
+##read 2D uav image
+```{r}
+path_reflectance <- "G:/Rapeseed phynotyping/rapeseed phynotyping test flight 20180226/4_index/reflectance"
+
+#The flight date is 20180225, while the processing date is 20180226
+rapeseed_20180225 <- read_uav(path = path_reflectance, 
+                              red = "rapeseed phynotyping test flight 20180226_transparent_reflectance_red.tif",
+                              green = "rapeseed phynotyping test flight 20180226_transparent_reflectance_green.tif", 
+                              blue = "rapeseed phynotyping test flight 20180226_transparent_reflectance_blue.tif", 
+                              rededge = "rapeseed phynotyping test flight 20180226_transparent_reflectance_rededge.tif",
+                              nir = "rapeseed phynotyping test flight 20180226_transparent_reflectance_nir.tif")
+
+```
+
+##read ndvi uav image
+```{r}
+path_ndvi <- "G:/Rapeseed phynotyping/rapeseed phynotyping test flight 20180226/4_index/indices/ndvi"
+rapeseed_20180225$ndvi <- raster(file.path(path_ndvi, "rapeseed phynotyping test flight 20180226_index_ndvi.tif"))
+```
+
+
+##View some information of the image
+```{r}
+rapeseed_20180225@extent
+rapeseed_20180225@crs
+
+res(rapeseed_20180225)
+```
+
+##remove values that are larger than 1
+```{r}
+
+```
+
+
+##plot the RGB images
+```{r}
+plotRGB(rapeseed_20180225, 3,2,1, stretch = "lin")
+plotRGB(rapeseed_20180225, 5,3,2, stretch = "lin")
+
+```
+
+##plot the bands individuals
+```{r}
+par(mfrow = c(2,3))
+plot(rapeseed_20180225$blue)
+plo
+```
+
+#segmentation
+```{r}
+#epsg for WGS84/UTM 10 is 32610
+
+```
+
