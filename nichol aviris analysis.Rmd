@@ -1,0 +1,107 @@
+---
+title: "nichol aviris analysis"
+author: "Zhehan Tang"
+date: "May 16, 2018"
+output: html_document
+---
+#package preparation
+```{r}
+library(raster)
+library(dplyr)
+library(ggplot2)
+```
+
+#read swp data
+```{r}
+#read cropped aviris data
+path_aviris <- "F:/CITRIS Project/Pistachio_AVIRIS/aviris_160621_nic_trees"
+#get all the files in the directory
+aviris_160621_all <- list.files(path_aviris)
+aviris_160621_tif <- aviris_160621_all[-grep(".enp|.hdr", aviris_160621_all)]
+
+#read all 
+aviris_160621_list <- list()
+for (i in 1:10){
+  #read 10 small raster
+  aviris_160621_list[[i]] <- brick(paste0(path_aviris, "/", aviris_160621_tif[i]))
+  #name individual band of each raster
+  names(aviris_160621_list[[i]]) <- sapply(1:224, function(x) paste("Band", x, sep = "_"))
+}
+#Give each raster a name
+names(aviris_160621_list) <- aviris_160621_tif
+
+```
+
+#convert the raster list to a data frame
+```{r}
+#create a data frame
+df_aviris_160621 <- as.data.frame(matrix(0, 10, 225))
+#change column name of the data frame
+names(df_aviris_160621) <- c("ID", sapply(1:224, function(x) paste("Band", x, sep = "_")))
+#input values 
+for (i in 1:10){
+  #ID for the tree 
+  df_aviris_160621[i,1] <- strsplit(names(aviris_160621_list)[i], split = "aviris_")[[1]][2]
+  #Bands 
+  df_aviris_160621[i,2:225]<- as.vector(getValues(aviris_160621_list[[i]]))
+}
+
+#remove CN
+df_aviris_160621 <- dplyr::filter(df_aviris_160621, ID %in% c("NIC_D01_NE", "NIC_D01_NW","NIC_D01_SE", "NIC_D01_SW", "NIC_T02_NE", "NIC_T02_NW", "NIC_T02_SE", "NIC_T02_SW"))
+```
+
+#read swp data
+```{r}
+path_output <- "F:/CITRIS Project/Results/Pistachio results"
+swp_pis <- read.csv(file.path(path_output, "swp_pis.csv"))
+swp_pis$X <- NULL
+swp_pis$ID <- paste(swp_pis$station, swp_pis$tree, sep = "_")
+#select swp data 
+swp_pis_2016_nic <- dplyr::filter(swp_pis, station %in% c("NIC_D01", "NIC_T01", "NIC_T02"), year == 2016)
+head(swp_pis_2016_nic)
+
+
+```
+
+#swp for the specific dates and trees 
+```{r}
+swp_160629_nic <- dplyr::filter(swp_pis_2016_nic, date == "2016-06-29", ID %in% c("NIC_D01_NE", "NIC_D01_NW","NIC_D01_SE", "NIC_D01_SW", "NIC_T02_NE", "NIC_T02_NW", "NIC_T02_SE", "NIC_T02_SW"))
+```
+
+#combine swp and aviris data frame 
+```{r}
+#sort by ID
+swp_160629_nic <- swp_160629_nic[order(swp_160629_nic$ID),]
+
+#sort by ID
+df_aviris_160621 <- df_aviris_160621[order(df_aviris_160621$ID),]
+
+#Combine two data frame
+df_swp_aviris_nic <- cbind(df_aviris_160621, swp_160629_nic$SWP.Bar)
+
+names(df_swp_aviris_nic)[226] <- "SWP"
+```
+
+#PRI function
+```{r}
+pri <- function(band531, band570){
+  PRI <- (band531-band570)/(band531+band570)
+  return(PRI)
+}
+```
+
+#Generate PRI values from aviris data 
+```{r}
+PRI_aviris_160621 <- pri(band531 = df_swp_aviris_nic$Band_18, band570 = df_swp_aviris_nic$Band_22)
+
+summary(lm(df_swp_aviris_nic$SWP~PRI_aviris_160621))
+
+plot(x = PRI_aviris_160621, df_swp_aviris_nic$SWP,xlab = "PRI", ylab  = "SWP")
+
+```
+
+#why it's OK to use the 160629 SWP data
+```{r}
+ggplot(dplyr::filter(swp_pis_2016_nic, ID %in% c("NIC_D01_NE", "NIC_D01_NW","NIC_D01_SE", "NIC_D01_SW", "NIC_T02_NE", "NIC_T02_NW", "NIC_T02_SE", "NIC_T02_SW")), aes(x = date, y = SWP.Bar, color = as.factor(ID)))+geom_point()
+```
+
