@@ -1,0 +1,525 @@
+---
+title: "PRI data analysis"
+author: "Zhehan"
+date: "August 24, 2017"
+output: html_document
+---
+
+#Package preparation
+```{r}
+library(lubridate)
+library(ggplot2)
+
+```
+
+#Read PRI_D02 data
+- path_PRI: The path to store data file. 
+- PRI_D02: The data frame to store PRI. 
+```{r}
+#path_PRI <- "E:/CITRIS Project/Pistachio_PRI"
+path_PRI <- "G:/CITRIS Project/Pistachio_PRI"
+#Read all PRI data
+PRI_D02_1 <- read.table(file.path(path_PRI, "PRI_D02_PRIdata_2017_09_18_16_38_54.dat"), 
+                      header = FALSE, 
+                      sep = ",", skip = 4)[,c(1,6:9)]
+PRI_D02_2 <- read.table(file.path(path_PRI, "PRI_D02_PRIdata_2017_09_18_18_00_49.dat"), 
+                      header = FALSE, 
+                      sep = ",", skip = 4)[,c(1,6:9)]
+PRI_D02_3 <- read.table(file.path(path_PRI, "PRI_D02_PRIdata_2017_12_12_15_25_04.dat"), 
+                      header = FALSE, 
+                      sep = ",", skip = 4)[,c(1,5:8)]
+#change column names
+names(PRI_D02_1)=names(PRI_D02_2)=names(PRI_D02_3)=c("TIMESTAMP", "Down570",  "Up570", "Down531", "Up531")
+PRI_D02 <- rbind(PRI_D02_1, PRI_D02_2, PRI_D02_3)
+
+
+
+#view the data
+head(PRI_D02)
+#head(PRI_D02_new)
+```
+
+#Function to calculate PRI. It's more accurate to calculate it than to use the given value
+- pri: the function to calculate PRI
+```{r}
+pri <- function(d570, u570, d531, u531){
+  p570 <- d570/u570 #reflectance at 570 nm
+  p531 <- d531/u531 #reflectance at 531 nm
+  pri <- (p531-p570)/(p570+p531)
+  return(pri)
+}
+```
+
+```{r}
+#Have a look at the rows with missing data
+colSums(is.na(PRI_D02))
+colSums(PRI_D02 == 0, na.rm = TRUE)
+
+```
+
+#preprocessing of PRI_D02
+```{r}
+PRI_D02_proc <- function(PRI_D02){
+
+  #convert to timestamp format
+  PRI_D02$TIMESTAMP <- strptime(as.character(PRI_D02$TIMESTAMP), "%Y-%m-%d %H:%M:%S")
+  
+  #add the column of date and time (split TIMESTAMP into two columns)
+  #only the date
+  PRI_D02$Date <- lubridate::date(PRI_D02$TIMESTAMP)
+  #only the clock time
+  PRI_D02$Time <- lubridate::hour(PRI_D02$TIMESTAMP)+minute(PRI_D02$TIMESTAMP)/60+ second(PRI_D02$TIMESTAMP)/3600
+  
+  #round the value to 3 digits 
+  PRI_D02$Down570_round3 <- round(PRI_D02$Down570, digits = 3)
+  PRI_D02$Up570_round3 <- round(PRI_D02$Up570, digits = 3)
+  PRI_D02$Down531_round3 <- round(PRI_D02$Down531, digits = 3)
+  PRI_D02$Up531_round3 <- round(PRI_D02$Up531, digits = 3)
+  #round the value to 4 digits 
+  PRI_D02$Down570_round4 <- round(PRI_D02$Down570, digits = 4)
+  PRI_D02$Up570_round4 <- round(PRI_D02$Up570, digits = 4)
+  PRI_D02$Down531_round4 <- round(PRI_D02$Down531, digits = 4)
+  PRI_D02$Up531_round4 <- round(PRI_D02$Up531, digits = 4)
+
+
+  #add the column of PRI_calc, which is the calculated PRI
+  PRI_D02$PRI <- pri(d570 = PRI_D02$Down570, u570 = PRI_D02$Up570, d531 = PRI_D02$Down531, u531 = PRI_D02$Up531)
+  #calculate the PRI by using the rounded 3 value
+  PRI_D02$PRI_round3 <- pri(d570 = PRI_D02$Down570_round3, u570 = PRI_D02$Up570_round3, d531 = PRI_D02$Down531_round3, u531 = PRI_D02$Up531_round3)
+  #calculate the PRI by using the rounded 4 value
+  PRI_D02$PRI_round4 <- pri(d570 = PRI_D02$Down570_round4, u570 = PRI_D02$Up570_round4, d531 = PRI_D02$Down531_round4, u531 = PRI_D02$Up531_round4)
+  
+  #remove the rows with NAs
+  PRI_D02 <- na.omit(PRI_D02)
+  
+  return(PRI_D02)
+}
+
+#run the function
+PRI_D02 <- PRI_D02_proc(PRI_D02)
+head(PRI_D02)
+```
+
+#(NOT useful)The function that get rid of outliers 
+- PRI_D02_scale_0.5: PRI value within [-0.5, 0.5]
+```{r}
+PRI_scale <- function(PRI, lower, upper){
+  return(PRI[PRI$PRI<upper & PRI$PRI>lower,])
+}
+
+# remove extreme PRI value that is outside of [-0.5, 0.5]
+#most of PRI values are just around 0, so we can remove values outside (-0.5,0.5)
+PRI_D02_scale_0.5 <- PRI_scale(PRI_D02, lower = -0.5, upper  = 0.5)
+#PRI_D02_new_scale_0.5 <- PRI_scale(PRI_D02_new, lower = -0.5, upper = 0.5)
+```
+
+#date selection, remove the first day and the last day 
+```{r}
+##date selection function
+## data is the PRI data frame, begin is the begining date, end is the end date
+date_selection <- function(data, begin, end){
+  data_date_selection <- data[data$Date >= begin & data$Date <= end,]
+  return(data_date_selection)
+}
+
+```
+
+# Draw the time series plot
+```{r}
+ggplot(PRI_D02, aes(TIMESTAMP, PRI)) + geom_line()  + ggtitle("PRI D02") +  scale_x_datetime("Time", date_labels = "%m-%d", date_breaks = "1 week")
+
+ggplot(PRI_D02, aes(TIMESTAMP, PRI_round3)) + geom_line()  + ggtitle("PRI D02 (round 3)") +  scale_x_datetime("Time", date_labels = "%m-%d", date_breaks = "1 week")
+
+ggplot(PRI_D02, aes(TIMESTAMP, PRI_round4)) + geom_line()  + ggtitle("PRI D02 (round 4)") +  scale_x_datetime("Time", date_labels = "%m-%d", date_breaks = "1 week")
+
+
+```
+
+# Subset PRI_D02 with only noon time
+```{r}
+noon_selection <- function(data, early, late){
+  data_noon <- data[data$Time >= early & data$Time <= late,]
+  return(data_noon)
+}
+
+```
+
+
+# Draw individual time series curve for different dates
+```{r}
+
+#draw individual curves for different dates
+
+
+# noon time 10:00-16:00, solar noon is around 12:40 before 11-05, and it's 11:40 after 11-05
+##from 10:00 to 16:00
+ggplot(data = noon_selection(PRI_D02, 10, 16), aes(x = Time, y = PRI, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D02') #+ scale_y_continuous(limits = c(-0.2,0.2))
+##choose the date between 08-09 and 09-18
+ggplot(data = date_selection(noon_selection(PRI_D02, 10, 16),"2017-08-09","2017-09-18"), aes(x = Time, y = PRI, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D02 from 08.09 to 09.18') + scale_y_continuous(limits = c(-0.2,0.2))
+##choose the date between 09-18 and 09-26
+ggplot(data = date_selection(noon_selection(PRI_D02, 10, 16),"2017-09-18","2017-09-26"), aes(x = Time, y = PRI, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D02 from 09.18 to 09.26') + scale_y_continuous(limits = c(-0.2,0.2))
+##choose the date after 09-26
+ggplot(data = date_selection(noon_selection(PRI_D02, 10, 16),"2017-09-26","2017-11-15"), aes(x = Time, y = PRI, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D02 from 09.26 to 11.15') + scale_y_continuous(limits = c(-0.2,0.2))
+
+##from 11:00 to 15:00
+
+#plot the rounded PRI
+##choose the date after 09-26
+ggplot(data = date_selection(noon_selection(PRI_D02, 10, 16),"2017-09-26","2017-11-15"), aes(x = Time, y = PRI_round3, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D02 (round 3) from 09.26 to 11.15') + scale_y_continuous(limits = c(-0.2,0.2))
+ggplot(data = date_selection(noon_selection(PRI_D02, 10, 16),"2017-09-26","2017-11-15"), aes(x = Time, y = PRI_round4, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D02 (round 4) from 09.26 to 11.15') + scale_y_continuous(limits = c(-0.2,0.2))
+
+
+```
+
+
+
+# Calculate daily average, using only the data during noon time
+##Function to calculate daily average using only the noon time
+```{r}
+### calculate daily average
+PRI_daily_ave <- function(data, early, late){
+  ### split by different date
+  PRI_D02_noon_split <- split(noon_selection(data, early, late), noon_selection(data, early, late)$Date)
+  # need to change the number of columns in it. 14 is the column number of PRI_calc
+  PRI_D02_daily <- lapply(lapply(PRI_D02_noon_split, '[[', 13 ), mean)
+  ### convert it to a data frame 
+  PRI_D02_daily <- data.frame("date" = ymd(names(PRI_D02_daily)), "PRI" = unlist(PRI_D02_daily))
+  
+  return(PRI_D02_daily)
+}
+
+##Another way to calculate the daily average
+PRI_daily_ave_2 <- function(data, early, late, begin, end){
+  #select only the noon time and only the date that I'm interested in 
+  PRI_date <- date_selection(data, begin, end)
+  PRI_date_noon <- noon_selection(PRI_date, early, late)
+  
+  #aggregate
+  PRI_date_noon <- aggregate(x = PRI_date_noon[,-c(1,6,7)], by = list(Date = PRI_date_noon$Date), FUN = mean) #c(1,6,7) is the time variables
+  
+  return(PRI_date_noon)
+}
+
+
+```
+
+
+```{r}
+
+# Draw a plot of 10:00 - 16
+##from 08-09 to 11-15
+ggplot(data = PRI_daily_ave_2(PRI_D02, 10, 16, "2017-08-09", "2017-11-15"), aes(x = Date, y = PRI)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D02 10:00-16:00 from 08-09 to 11-15') +  scale_x_date(date_labels = "%m-%d", date_breaks = "2 weeks")
+ggplot(data = PRI_daily_ave_2(PRI_D02, 10, 16, "2017-08-09", "2017-11-15"), aes(x = Date, y = PRI_round3)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D02 (round 3) 10:00-16:00 from 08-09 to 11-15')+  scale_x_date(date_labels = "%m-%d", date_breaks = "2 weeks")
+ggplot(data = PRI_daily_ave_2(PRI_D02, 10, 16, "2017-08-09", "2017-11-15"), aes(x = Date, y = PRI_round4)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D02 (round 4) 10:00-16:00 from 08-09 to 11-15')+  scale_x_date(date_labels = "%m-%d", date_breaks = "2 weeks")
+
+##from 09-26 to 11-15
+ggplot(data = PRI_daily_ave_2(PRI_D02, 10, 16, "2017-09-26", "2017-11-15"), aes(x = Date, y = PRI)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D02 10:00-16:00 from 09-26 to 11-15')
+ggplot(data = PRI_daily_ave_2(PRI_D02, 10, 16, "2017-09-26", "2017-11-15"), aes(x = Date, y = PRI_round3)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D02 (round 3) 10:00-16:00 from 09-26 to 11-15')
+ggplot(data = PRI_daily_ave_2(PRI_D02, 10, 16, "2017-09-26", "2017-11-15"), aes(x = Date, y = PRI_round4)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D02 (round 4) 10:00-16:00 from 09-26 to 11-15')
+
+
+##from 08-09 to 09-18 (Three are the same)
+ggplot(data = PRI_daily_ave_2(PRI_D02, 10, 16, "2017-08-09", "2017-09-18"), aes(x = Date, y = PRI)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D02 10:00-16:00 from 08-09 to 09-18')
+ggplot(data = PRI_daily_ave_2(PRI_D02, 10, 16, "2017-08-09", "2017-09-18"), aes(x = Date, y = PRI_round3)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D02 (round 3) 10:00-16:00 from 08-09 to 09-18')
+ggplot(data = PRI_daily_ave_2(PRI_D02, 10, 16, "2017-08-09", "2017-09-18"), aes(x = Date, y = PRI_round4)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D02 (round 4) 10:00-16:00 from 08-09 to 09-18')
+
+
+```
+
+# Read D04 Data
+```{r}
+PRI_D04 <- read.csv(file.path(path_PRI, "FLO_D04_Pistachio_PRIdata_12Dec2017.csv"), header = FALSE, na.strings = "***", skip = 3)[,c(1,7,8)]  # Replace * with NAs
+colnames(PRI_D04) <- c("TIMESTAMP","Down531","Down570")
+
+#view the data
+head(PRI_D04)
+```
+
+# Preprocessing of PRI_D04
+```{r}
+PRI_D04_proc <- function(PRI_D04){
+  # %p is the AM/PM indicator, and it should be used in conjunction with %I and not with %h
+  PRI_D04$TIMESTAMP <- strptime(as.character(PRI_D04$TIMESTAMP), "%m/%d/%Y %I:%M:%S %p" )
+  #only after 2017-08-08, as we install the sensor in 2017-08-09
+  PRI_D04 <- PRI_D04[date(PRI_D04$TIMESTAMP)>"2017-08-08",]
+  
+  #subset PRI_D04, only remain the records that have the same time as D02
+  PRI_D04 <- PRI_D04[match(PRI_D02$TIMESTAMP, PRI_D04$TIMESTAMP, nomatch = 0),]
+  PRI_D02_match <- PRI_D02[match(PRI_D04$TIMESTAMP, PRI_D02$TIMESTAMP, nomatch = 0),]
+  
+  #add another two columns to PRI_D04 (Up531 and Up570)
+  PRI_D04$Up531 <- PRI_D02_match$Up531
+  PRI_D04$Up570 <- PRI_D02_match$Up570
+  
+  #add the column of date and time (split TIMESTAMP into two columns)
+  #only the date
+  PRI_D04$Date <- date(PRI_D04$TIMESTAMP)
+  #only the clock time
+  PRI_D04$Time <- hour(PRI_D04$TIMESTAMP)+minute(PRI_D04$TIMESTAMP)/60+ second(PRI_D04$TIMESTAMP)/3600
+  
+  #round the value to 3 digits 
+  PRI_D04$Down570_round3 <- round(PRI_D04$Down570, digits = 3)
+  PRI_D04$Up570_round3 <- round(PRI_D04$Up570, digits = 3)
+  PRI_D04$Down531_round3 <- round(PRI_D04$Down531, digits = 3)
+  PRI_D04$Up531_round3 <- round(PRI_D04$Up531, digits = 3)
+  #round the value to 4 digits 
+  PRI_D04$Down570_round4 <- round(PRI_D04$Down570, digits = 4)
+  PRI_D04$Up570_round4 <- round(PRI_D04$Up570, digits = 4)
+  PRI_D04$Down531_round4 <- round(PRI_D04$Down531, digits = 4)
+  PRI_D04$Up531_round4 <- round(PRI_D04$Up531, digits = 4)
+  
+  #Calculate PRI for D04
+  PRI_D04$PRI <- pri(d570 = PRI_D04$Down570, u570 = PRI_D04$Up570, d531 = PRI_D04$Down531, u531 = PRI_D04$Up531)
+  #calculate the PRI by using the rounded 3 value
+  PRI_D04$PRI_round3 <- pri(d570 = PRI_D04$Down570_round3, u570 = PRI_D04$Up570_round3, d531 = PRI_D04$Down531_round3, u531 = PRI_D04$Up531_round3)
+  #calculate the PRI by using the rounded 4 value
+  PRI_D04$PRI_round4 <- pri(d570 = PRI_D04$Down570_round4, u570 = PRI_D04$Up570_round4, d531 = PRI_D04$Down531_round4, u531 = PRI_D04$Up531_round4)
+  
+  #remove the rows with NAs
+  PRI_D04 <- na.omit(PRI_D04)
+  
+  #Reorder the columns 
+  PRI_D04 <- PRI_D04[,names(PRI_D02)]
+  
+  return(PRI_D04)
+}
+
+PRI_D04 <- PRI_D04_proc(PRI_D04)
+head(PRI_D04)
+```
+
+# get an overview of the PRI_D04
+```{r}
+str(PRI_D04)
+summary(PRI_D04$PRI)
+hist(PRI_D04$PRI)
+```
+
+# Draw the time series plots for PRI_D04
+```{r}
+# the first plot uses the smallest time unit (30 minutes)
+ggplot(PRI_D04, aes(TIMESTAMP, PRI)) + geom_line() + scale_x_datetime("Time", date_labels = "%m-%d", date_breaks = "1 week") + ggtitle("PRI D04") + scale_y_continuous(limits = c(-0.5,0.5))
+
+ggplot(PRI_D04, aes(TIMESTAMP, PRI_round3)) + geom_line() + scale_x_datetime("Time", date_labels = "%m-%d", date_breaks = "1 week") + ggtitle("PRI D04 (round 3)")+ scale_y_continuous(limits = c(-0.5,0.5))
+
+ggplot(PRI_D04, aes(TIMESTAMP, PRI_round4)) + geom_line() + scale_x_datetime("Time", date_labels = "%m-%d", date_breaks = "1 week") + ggtitle("PRI D04 (round 4)") + scale_y_continuous(limits = c(-0.5,0.5))
+
+```
+
+# Draw individual time series curve for different dates for PRI_D04
+```{r}
+
+#draw individual curves for different dates
+
+#The plot that select only noon time
+#connecting line
+#solar noon is around 13:00
+ggplot(data = noon_selection(PRI_D04, 10, 16), aes(x = Time, y = PRI, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D04')
+##choose the date between 08-09 and 09-18
+ggplot(data = date_selection(noon_selection(PRI_D04, 10, 16),"2017-08-09","2017-09-18"), aes(x = Time, y = PRI, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D04 from 08.09 to 09.18') + scale_y_continuous(limits = c(-0.1,0.2))
+##choose the date after 09-26
+ggplot(data = date_selection(noon_selection(PRI_D04, 10, 16),"2017-09-26","2017-11-15"), aes(x = Time, y = PRI, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D04 from 09.26 to 11.15') + scale_y_continuous(limits = c(-0.1,0.2))
+
+#plot the rounded PRI
+##choose the date between 08-09 to 09-18
+ggplot(data = date_selection(noon_selection(PRI_D04, 10, 16),"2017-08-09","2017-09-18"), aes(x = Time, y = PRI_round3, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D04 (round 3) from 08.09 to 09.18') + scale_y_continuous(limits = c(-0.1,0.2))
+ggplot(data = date_selection(noon_selection(PRI_D04, 10, 16),"2017-08-09","2017-09-18"), aes(x = Time, y = PRI_round4, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D04 (round 4) from 08.09 to 09.18') + scale_y_continuous(limits = c(-0.1,0.2))
+
+##choose the date after 09-26
+ggplot(data = date_selection(noon_selection(PRI_D04, 10, 16),"2017-09-26","2017-11-15"), aes(x = Time, y = PRI_round3, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D04 (round 3) from 09.26 to 11.15') + scale_y_continuous(limits = c(-0.2,0.2))
+ggplot(data = date_selection(noon_selection(PRI_D04, 10, 16),"2017-09-26","2017-11-15"), aes(x = Time, y = PRI_round4, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle('10:00-16:00 curve of PRI_D04 (round 4) from 09.26 to 11.15') + scale_y_continuous(limits = c(-0.2,0.2))
+
+
+
+
+
+```
+
+#The function to calculate steady state PRI and delta PRI
+```{r}
+#delta.pri <- function(pri, hour){
+#  steady.pri <- pri[pri$Time == hour,]
+#  delta.pri <- rep(0, nrow(pri))
+#  for(i in 1:nrow(pri)){
+#    for(j in 1:nrow(steady.pri)){
+#      if (pri[i,]$Date == steady.pri[j,]$Date){
+#        delta.pri[i] <- pri[i,]$PRI - steady.pri[j,]$PRI
+#      }
+#    }
+#  }
+#  return(delta.pri)
+#}
+
+#PRI_D04$PRI_delta <- NULL 
+#PRI_D04$PRI_delta <- delta.pri(PRI_D04, 9)
+#PRI_D02$PRI_delta <- delta.pri(PRI_D02, 9)
+```
+
+```{r}
+##plot of delta pri
+#ggplot(data = noon_selection(PRI_D04, 10, 16), aes(x = Time, y = PRI_delta, group = Date)) + geom_point(aes(colour = as.factor(Date))) + geom_line(aes(colour = as.factor(Date))) + ggtitle('10:00-16:30 curve of delta PRI_D04')
+
+#ggplot(data = noon_selection(PRI_D02, 10, 16), aes(x = Time, y = PRI_delta, group = Date)) + geom_point(aes(colour = as.factor(Date))) + geom_line(aes(colour = as.factor(Date))) + ggtitle('10:00-16:30 curve of delta PRI_D02')
+
+```
+
+
+
+
+#Calculate daily average, using only the data during noon time and compare with PRI_D02
+##function to 
+```{r}
+### calculate daily average
+PRI_daily_ave_D04 <- function(data, early, late){
+  ### split by different date
+  PRI_D04_noon_split <- split(noon_selection(data, early, late), noon_selection(data, early, late)$Date)
+  # need to change the number of columns in it. 6 is the column number of PRI_calc
+  PRI_D04_daily <- lapply(lapply(PRI_D04_noon_split, '[[', 6 ), mean)
+  ### convert it to a data frame 
+  PRI_D04_daily <- data.frame("date" = ymd(names(PRI_D04_daily)), "PRI" = unlist(PRI_D04_daily))
+  
+  return(PRI_D04_daily)
+}
+
+##Another way to calculate the daily average
+PRI_daily_ave_2 <- function(data, early, late, begin, end){
+  #select only the noon time and only the date that I'm interested in 
+  PRI_date <- date_selection(data, begin, end)
+  PRI_date_noon <- noon_selection(PRI_date, early, late)
+  
+  #aggregate
+  PRI_date_noon <- aggregate(x = PRI_date_noon[,-c(1,6,7)], by = list(Date = PRI_date_noon$Date), FUN = mean) #c(1,6,7) is the time variables
+  
+  return(PRI_date_noon)
+}
+
+
+
+```
+
+```{r}
+# Draw a plot of 10:00 - 16
+##from 08-09 to 11-15
+ggplot(data = PRI_daily_ave_2(PRI_D04, 10, 16, "2017-08-09", "2017-11-15"), aes(x = Date, y = PRI)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D04 10:00-16:00 from 08-09 to 11-15') +  scale_x_date(date_labels = "%m-%d", date_breaks = "2 weeks")
+ggplot(data = PRI_daily_ave_2(PRI_D04, 10, 16, "2017-08-09", "2017-11-15"), aes(x = Date, y = PRI_round3)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D04 (round 3) 10:00-16:00 from 08-09 to 11-15')+  scale_x_date(date_labels = "%m-%d", date_breaks = "2 weeks")
+ggplot(data = PRI_daily_ave_2(PRI_D04, 10, 16, "2017-08-09", "2017-11-15"), aes(x = Date, y = PRI_round4)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D04 (round 4) 10:00-16:00 from 08-09 to 11-15')+  scale_x_date(date_labels = "%m-%d", date_breaks = "2 weeks")
+
+##from 09-26 to 11-15
+ggplot(data = PRI_daily_ave_2(PRI_D04, 10, 16, "2017-09-26", "2017-11-15"), aes(x = Date, y = PRI)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D04 10:00-16:00 from 09-26 to 11-15')
+ggplot(data = PRI_daily_ave_2(PRI_D04, 10, 16, "2017-09-26", "2017-11-15"), aes(x = Date, y = PRI_round3)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D04 (round 3) 10:00-16:00 from 09-26 to 11-15')
+ggplot(data = PRI_daily_ave_2(PRI_D04, 10, 16, "2017-09-26", "2017-11-15"), aes(x = Date, y = PRI_round4)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D04 (round 4) 10:00-16:00 from 09-26 to 11-15')
+
+
+##from 08-09 to 09-18 
+ggplot(data = PRI_daily_ave_2(PRI_D04, 10, 16, "2017-08-09", "2017-09-18"), aes(x = Date, y = PRI)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D04 10:00-16:00 from 08-09 to 09-18')
+ggplot(data = PRI_daily_ave_2(PRI_D04, 10, 16, "2017-08-09", "2017-09-18"), aes(x = Date, y = PRI_round3)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D04 (round 3) 10:00-16:00 from 08-09 to 09-18')
+ggplot(data = PRI_daily_ave_2(PRI_D04, 10, 16, "2017-08-09", "2017-09-18"), aes(x = Date, y = PRI_round4)) + geom_point() + geom_line() + ggtitle('Daily Average PRI D04 (round 4) 10:00-16:00 from 08-09 to 09-18')
+
+
+```
+
+#compare D02 with D04
+```{r}
+#compare D02 and D04
+# Draw a plot of 11:00 - 15:00
+
+#ggplot(data = PRI_daily_ave_2(PRI_D04, 10, 16, "2017-08-09", "2017-11-15"), aes(x = date, y = PRI)) + geom_point() + geom_line() + ggtitle('Daily Average PRI 10:00-16:00 (Red is D02 and Black is D04)') + geom_line(data = PRI_daily_ave_2(PRI_D02, 10, 16, "2017-08-09", "2017-11-15"), aes(x = date, y = PRI), color = "red") + geom_point(data = PRI_daily_ave_2(PRI_D02, 10, 16, "2017-08-09", "2017-11-15"), aes(x = date, y = PRI), color = "red") + scale_colour_manual("", breaks = c("D02","D04"), values = c("D02"="red", "D04"="black"))
+
+```
+
+
+### The daily average seems to be a good indicator of water potential
+- The daily average of D04 is higher than D02, and the water potential for D04 is higher than D02. According to the SWP measuremennt by Giulia on Sept 19th, the SWP D02 is -12.6, the SWP D04 is -10. 
+
+
+### Check the diurnal cycle of incoming radiation
+- Very clear diurnal cycle, peak at 13:00. 
+```{r}
+#uP531 from D04
+ggplot(data = PRI_D04, aes(x = Time, y = Up531, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle("Incoming radiation up531")
+ggplot(data = date_selection(PRI_D04, "2017-08-09", "2017-09-18"), aes(x = Time, y = Up531, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle("Incoming radiation up531")
+ggplot(data = date_selection(PRI_D04, "2017-09-26", "2017-11-15"), aes(x = Time, y = Up531, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle("Incoming radiation up531")
+
+#Up570 from D04
+ggplot(data = PRI_D04, aes(x = Time, y = Up570, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle("Incoming radiation up570")
+ggplot(data = date_selection(PRI_D04, "2017-08-09", "2017-09-18"), aes(x = Time, y = Up570, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle("Incoming radiation up570")
+ggplot(data = date_selection(PRI_D04, "2017-09-30", "2017-11-15"), aes(x = Time, y = Up570, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle("Incoming radiation up570 after 09-30") + scale_x_time(limits = c(0,24))
+
+
+
+ggplot(data = PRI_D02, aes(x = Time, y = Up531, color = as.factor(Date))) + geom_point() + geom_line() + ggtitle("Incoming radiation up531")
+ggplot(data = date_selection(PRI_D02, "2017-08-09", "2017-09-18"), aes(x=Time, y=Up531,color = as.factor(Date)))+geom_point()+geom_line()
+ggplot(data = date_selection(PRI_D02, "2017-09-26", "2017-11-15"), aes(x=Time, y=Up531,color = as.factor(Date)))+geom_point()+geom_line()
+
+
+
+ggplot(data = PRI_D04, aes(x = Time, y = Up570, group = Date)) + geom_point(aes(color = as.factor(Date))) + geom_line(aes(color = as.factor(Date))) + ggtitle("Incoming radiation up570")
+
+
+### Check the diurnal cycle of upcoming radiation
+# for PRI_D04
+ggplot(data = PRI_D04, aes(x = Time, y = Down531, group = Date)) + geom_point(aes(color = as.factor(Date))) + geom_line(aes(color = as.factor(Date))) + ggtitle("Radiation Down531 for D04")
+
+ggplot(data = PRI_D04, aes(x = Time, y = Down570, group = Date)) + geom_point(aes(color = as.factor(Date))) + geom_line(aes(color = as.factor(Date))) + ggtitle("Radiation Down570 for D04")
+
+# for PRI_D02
+ggplot(data = PRI_D02, aes(x = Time, y = Down531, group = Date)) + geom_point(aes(color = as.factor(Date))) + geom_line(aes(color = as.factor(Date))) + ggtitle("Radiation Down531 for D02")
+
+ggplot(data = PRI_D02, aes(x = Time, y = Down570, group = Date)) + geom_point(aes(color = as.factor(Date))) + geom_line(aes(color = as.factor(Date))) + ggtitle("Radiation Down570 for D02")
+
+```
+
+### zoom in the plot of down radiation of PRI_D02 to see why there are only some points
+```{r}
+ggplot(data = noon_selection(PRI_D02, 11, 12), aes(x = Time, y = Down531, group = Date)) + geom_point(aes(color = as.factor(Date))) + geom_line(aes(color = as.factor(Date))) + ggtitle("Radiation Down531 for D02 11:00-12:00")
+PRI_D02$Time
+ddply(noon_selection(PRI_D02, 10, 16), .(Time), function(x) unique(x$PRI_calc))
+ddply(date_selection(PRI_D02, "2017-09-01","2017-09-05"), .(Time), function(x) unique(x$PRI_calc))
+unique(noon_selection(PRI_D02, 11, 12)$Down531)
+
+```
+
+### check the distribution of down sensors
+```{r}
+par(mfrow = c(2,2))
+hist(PRI_D02$Down531, breaks = seq(0, 0.030, 0.0001), ylim = c(0,80))
+hist(PRI_D04$Down531, breaks = seq(0, 0.030, 0.0001), ylim = c(0,80))
+hist(PRI_D02$Down570, breaks = seq(0, 0.030, 0.0001), ylim = c(0,80))
+hist(PRI_D04$Down570, breaks = seq(0, 0.030, 0.0001), ylim = c(0,80))
+
+```
+
+#draw multiple curves with 2 y-axis 
+```{r}
+PRI_ave_D02 <- PRI_daily_ave_2(PRI_D02, 11, 15, "2017-08-09", "2017-11-15")
+PRI_ave_D04 <- PRI_daily_ave_2(PRI_D04, 11, 15, "2017-08-09", "2017-11-15")
+
+
+par(mfrow =  c(1,1), mar =  c(5,5,2,5))
+plot(y = PRI_ave_D04$PRI, x = PRI_ave_D04$Date, type = 'l', col = "blue", ylab = "PRI values", xlab = "Date", ylim = c(0.012, -0.11))
+lines(y = PRI_ave_D02$PRI, x = PRI_ave_D02$Date, col = "red")
+par(new = T)
+with(dplyr::filter(swp_pis_center, date > as.Date("2017-08-08")), plot(x = date, y = SWP.Bar, pch = 16, axes = F, xlab = NA, ylab = NA, col = as.factor(station)))
+axis(side=4)
+mtext(side = 4, line = 3, 'SWP (Bars)')
+legend('topleft', legend = c("D02 SWP", "D04 SWP", "D02 PRI", "D04 PRI"), lty = c(0,0,1,1), pch = c(16, 16, NA, NA), col = c("red", "blue", "red", "blue"), cex = 0.5)
+
+
+a <- merge(swp_pis_center[swp_pis_center$station=="FLO_D02",], PRI_ave_D02, by.x = "date", by.y = "Date")
+b <- merge(swp_pis_center[swp_pis_center$station=="FLO_D04",], PRI_ave_D04, by.x = "date", by.y = "Date")
+d <- rbind(a,b)
+summary(lm(d$SWP.Bar~d$PRI))
+plot(d$SWP.Bar, d$PRI)
+ggplot(data = d, aes(x = PRI, y = SWP.Bar))+geom_point(aes(color = station))+geom_smooth(method = 'lm')
+
+#block average
+par(mfrow =  c(1,1), mar =  c(5,5,2,5))
+plot(y = PRI_ave_D04$PRI, x = PRI_ave_D04$Date, type = 'l', col = "blue", ylab = "PRI values", xlab = "Date", ylim = c(-0.012, 0.10))
+lines(y = PRI_ave_D02$PRI, x = PRI_ave_D02$Date, col = "red")
+par(new = T)
+with(dplyr::filter(swp_pis_ave, date > as.Date("2017-08-08")), plot(x = date, y = swp, pch = 16, axes = F, xlab = NA, ylab = NA, col = as.factor(station)))
+axis(side=4)
+mtext(side = 4, line = 3, 'SWP (Bars)')
+legend('topleft', legend = c("D02 SWP", "D04 SWP", "D02 PRI", "D04 PRI"), lty = c(0,0,1,1), pch = c(16, 16, NA, NA), col = c("red", "blue", "red", "blue"), cex = 0.5)
+```
+
