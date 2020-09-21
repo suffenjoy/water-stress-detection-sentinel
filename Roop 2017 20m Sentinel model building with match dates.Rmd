@@ -12,6 +12,8 @@ library(car)
 library(MASS)
 library(dplyr)
 library(gbm)
+library(ggpubr)
+library(ggthemes)
 library(lars)
 library(pls)
 library(ggplot2)
@@ -20,7 +22,8 @@ library(ggplot2)
 #read csv
 ```{r}
 #path_wal_sen <- "C:/Users/tangz/Box Sync/Zhehan/sentinel water stress detection/sentinel with match dates"
-path_output <- "G:/CITRIS Project/Results"
+#path_output <- "G:/CITRIS Project/Results"
+path_output <- "C:/Users/tangz/Box Sync/Water_stress_detection/Snapshots"
 roop_2017_20m <- read.csv(file.path(path_output, "roop_2017_20m.csv"), header = TRUE)
 
 #change data type of some columns
@@ -28,6 +31,7 @@ roop_2017_20m$irrigation <- as.factor(roop_2017_20m$irrigation)
 roop_2017_20m$ID <- as.factor(roop_2017_20m$ID)
 roop_2017_20m$rep <- as.factor(roop_2017_20m$rep)
 roop_2017_20m$date <- as.factor(roop_2017_20m$date)
+roop_2017_20m$date <- as.Date(roop_2017_20m$date)
 
 dim(roop_2017_20m)
 
@@ -53,6 +57,45 @@ swp_classification.2 <- function(swp){
 }
 
 ```
+
+#Boxplot
+```{r}
+ggplot(roop_2017_20m, aes(x = as.factor(date), y = swp, fill = irrigation))+geom_boxplot(position = position_dodge(0.75))+xlab("Date")+ylab("Stem Water Potential (Bars)") + theme_pubr(base_size = 14, base_family = "serif",border = TRUE, legend= "right")+labs(fill = "Irrigation Treatment")+scale_fill_tableau()
+
+ggplot(roop_2017_20m, aes(x = as.factor(date), y = swp.bs, fill = irrigation))+geom_boxplot(position = position_dodge(0.75))+xlab("Date")+ylab("SWP - Baseline SWP (Bars)") + theme_pubr(base_size = 14, base_family = "serif",border = TRUE, legend= "right")+labs(fill = "Irrigation Treatment")+scale_fill_tableau()
+
+```
+
+#Subset to early dates
+```{r}
+class(roop_2017_20m$date)
+roop_2017_20m_early <- subset(roop_2017_20m, date < "2017-07-24")
+roop_2017_20m_0619 <- subset(roop_2017_20m, date == "2017-06-19")
+dim(roop_2017_20m_0619)  #25 rows
+dim(roop_2017_20m_early)  #50 rows
+
+#SWP vs NDVI
+#two dates together
+ggplot(roop_2017_20m_early, aes(y = swp, x = ndvi))+geom_point(size=2,aes(color = irrigation, shape = as.factor(date)))+theme_pubr(base_size = 14, base_family = "serif",border = TRUE, legend= "right")+labs(color = "Irrigation", shape = "Date") + xlab("NDVI")+ylab("Stem Water Potential (Bars)")
+#0619 only
+ggplot(roop_2017_20m_0619, aes(y = swp, x = ndvi))+geom_point(size=2,aes(color = irrigation))+theme_pubr(base_size = 14, base_family = "serif",border = TRUE, legend= "right")+labs(color = "Irrigation") + xlab("NDVI")+ylab("Stem Water Potential (Bars)")
+
+
+#Other indices 
+r_roop_2017_20m_early <- apply(roop_2017_20m_early[,c(3:56)],2,function(x) summary(lm(roop_2017_20m_early$swp~x))$r.squared)
+sort(r_roop_2017_20m_early)
+#scatter plot
+ggplot(roop_2017_20m_early, aes(y = swp, x = mcari.osavi))+geom_point(size=2,aes(color = irrigation, shape = as.factor(date)))+theme_pubr(base_size = 14, base_family = "serif",border = TRUE, legend= "right")+labs(color = "Irrigation", shape = "Date") + xlab("MCARI/OSAVI")+ylab("Stem Water Potential (Bars)")+facet_wrap(~rep, scales ="free")
+
+
+#06-19 only 
+r_roop_2017_20m_0619 <- apply(roop_2017_20m_0619[,c(3:56)],2,function(x) summary(lm(roop_2017_20m_0619$swp~x))$r.squared)
+sort(r_roop_2017_20m_0619)
+ggplot(roop_2017_20m_0619, aes(y = swp, x = chl.rededge.2))+geom_point(size=2,aes(color = irrigation))+theme_pubr(base_size = 14, base_family = "serif",border = TRUE, legend= "right")+labs(color = "Irrigation") + xlab("Chl Rededge 2")+ylab("Stem Water Potential (Bars)") + geom_smooth()
+ggplot(roop_2017_20m_0619, aes(y = swp, x = swir1))+geom_point(size=2,aes(color = irrigation, shape = rep))+theme_pubr(base_size = 14, base_family = "serif",border = TRUE, legend= "right")+labs(color = "Irrigation") + xlab("SWIR1")+ylab("Stem Water Potential (Bars)") + geom_smooth(method = "lm", se = FALSE, color = "red") + facet_wrap(~rep, scales = "free") 
+
+```
+#aggregate to 
 
 #preprocessing
 ```{r}

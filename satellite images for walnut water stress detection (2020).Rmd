@@ -1,0 +1,178 @@
+---
+title: "Satellite images for walnut water stress detection"
+author: "Zhehan"
+date: "6/3/2020"
+output: html_document
+---
+
+#Package
+```{r}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(ggpubr)
+library(qdapRegex)
+library(raster)
+```
+
+#Read SWP data
+##Roop 2016
+```{r}
+path_swp <- "C:/Users/tangz/Box Sync/Water_stress_detection/dataframes"
+swp_roop_2016 <- read_excel(file.path(path_swp, "2016 Roop Ranch SWP (Zhehan) Data Spreadsheet.xlsx"))
+names(swp_roop_2016)
+
+#2016 data
+#Subset
+swp_roop_2016 <- swp_roop_2016[,c(1:7,11:12)]
+swp_roop_2016
+names(swp_roop_2016) <- c("Date","Tree_Row","Rep","Treatment","Treatment_color","Tree_Num","SWP","Baseline","SWP_BL")
+#remove NAs
+swp_roop_2016 <- na.omit(swp_roop_2016)
+#change class
+swp_roop_2016$Date <- as.Date(swp_roop_2016$Date)
+swp_roop_2016$Treatment <- as.factor(swp_roop_2016$Treatment)
+swp_roop_2016$Treatment_color <- as.factor(swp_roop_2016$Treatment_color)
+
+#change the name of treatment
+swp_roop_2016$Treatment <- gsub(swp_roop_2016$Treatment, pattern = " ", replacement = "_")
+unique(swp_roop_2016$Treatment)
+swp_roop_2016$Treatment <- gsub(swp_roop_2016$Treatment, pattern = "Grower_Practice", replacement = "0_bar_below")
+#add new ID for individual tree
+swp_roop_2016$ID <- paste(swp_roop_2016$Treatment, "Rep",swp_roop_2016$Rep,"Tree",swp_roop_2016$Tree_Num,sep = "_")
+unique(swp_roop_2016$ID)
+```
+##Roop 2017
+```{r}
+path_swp <- "C:/Users/tangz/Box Sync/Water_stress_detection/dataframes"
+swp_roop_2017 <- read_excel(file.path(path_swp, "2017 Roop Ranch (Zhehan Tang) SWP Data Spreadsheet.xlsx"))
+names(swp_roop_2017)
+
+#2017 data
+#Subset
+swp_roop_2017 <- swp_roop_2017[,c(1:7,11:12)]
+swp_roop_2017
+names(swp_roop_2017) <- c("Date","Tree_Row","Rep","Treatment","Treatment_color","Tree_Num","SWP","Baseline","SWP_BL")
+#remove NAs
+swp_roop_2017 <- na.omit(swp_roop_2017)
+#change class
+swp_roop_2017$Date <- as.Date(swp_roop_2017$Date)
+swp_roop_2017$Treatment <- as.factor(swp_roop_2017$Treatment)
+swp_roop_2017$Treatment_color <- as.factor(swp_roop_2017$Treatment_color)
+
+#change the name of treatment
+swp_roop_2017$Treatment <- gsub(swp_roop_2017$Treatment, pattern = " ", replacement = "_")
+unique(swp_roop_2017$Treatment)
+swp_roop_2017$Treatment <- gsub(swp_roop_2017$Treatment, pattern = "Grower_Practice", replacement = "0_bar_below")
+#add new ID for individual tree
+swp_roop_2017$ID <- paste(swp_roop_2017$Treatment, "Rep",swp_roop_2017$Rep,"Tree",swp_roop_2017$Tree_Num,sep = "_")
+unique(swp_roop_2017$ID)
+
+dim(swp_roop_2017) #2000, 10
+```
+##Roop 2018
+```{r}
+path_swp <- "C:/Users/tangz/Box Sync/Water_stress_detection/dataframes"
+swp_roop_2018 <- read_excel(file.path(path_swp, "2018 Roop Ranch Zhehan SWP.xlsx"))
+names(swp_roop_2018)
+
+#2018 data
+#Subset
+swp_roop_2018 <- swp_roop_2018[,c(1:7,10:11)]
+swp_roop_2018
+names(swp_roop_2018) <- c("Date","Tree_Row","Rep","Treatment","Treatment_color","Tree_Num","SWP","Baseline","SWP_BL")
+#remove NAs
+swp_roop_2018 <- na.omit(swp_roop_2018)
+#change class
+swp_roop_2018$Date <- as.Date(swp_roop_2018$Date)
+swp_roop_2018$Treatment <- as.factor(swp_roop_2018$Treatment)
+swp_roop_2018$Treatment_color <- as.factor(swp_roop_2018$Treatment_color)
+
+#change the name of treatment
+swp_roop_2018$Treatment <- gsub(swp_roop_2018$Treatment, pattern = " ", replacement = "_")
+unique(swp_roop_2018$Treatment)
+swp_roop_2018$Treatment <- gsub(swp_roop_2018$Treatment, pattern = "Grower_Practice", replacement = "0_bar_below")
+#add new ID for individual tree
+swp_roop_2018$ID <- paste(swp_roop_2018$Treatment, "Rep",swp_roop_2018$Rep,"Tree",swp_roop_2018$Tree_Num,sep = "_")
+unique(swp_roop_2018$ID)
+
+```
+
+
+
+#Temporal Change of SWP 
+##Roop 2016
+```{r}
+#2016 
+ggplot(subset(swp_roop_2016), aes(x = as.factor(Date), y = SWP, fill = Treatment)) + geom_boxplot() + theme_pubr(base_family = "serif", base_size = 14, border = TRUE, legend = "bottom") + scale_fill_tableau() + xlab("Date") + ylab("Stem Water Potential (Bars)")
+
+#2016
+ggplot(subset(swp_roop_2016, Date<"2016-08-01" & Date>"2016-05-15"), aes(x = as.factor(Date), y = SWP, fill = Treatment)) + geom_boxplot() + theme_pubr(base_family = "serif", base_size = 14, border = TRUE, legend = "bottom") + scale_fill_tableau() + xlab("Date") + ylab("Stem Water Potential (Bars)")
+#2016
+ggplot(subset(swp_roop_2016, Date<"2016-08-01" & Date>"2016-05-15"), aes(x = as.factor(Date), y = SWP_BL, fill = Treatment)) + geom_boxplot() + theme_pubr(base_family = "serif", base_size = 14, border = TRUE, legend = "bottom") + scale_fill_tableau() + xlab("Date") + ylab("SWP - Baseline (Bars)")
+
+```
+##Roop 2017
+```{r}
+ggplot(subset(swp_roop_2017), aes(x = as.factor(Date), y = SWP, fill = Treatment)) + geom_boxplot() + theme_pubr(base_family = "serif", base_size = 14, border = TRUE, legend = "bottom") + scale_fill_tableau() + xlab("Date") + ylab("Stem Water Potential (Bars)")
+
+#2017
+ggplot(subset(swp_roop_2017, Date<"2017-08-01" & Date>"2017-06-01"), aes(x = as.factor(Date), y = SWP, fill = Treatment)) + geom_boxplot() + theme_pubr(base_family = "serif", base_size = 14, border = TRUE, legend = "bottom") + scale_fill_tableau() + xlab("Date") + ylab("Stem Water Potential (Bars)")
+#2017
+ggplot(subset(swp_roop_2017, Date<"2017-08-01" & Date>"2017-06-15"), aes(x = as.factor(Date), y = SWP_BL, fill = Treatment)) + geom_boxplot() + theme_pubr(base_family = "serif", base_size = 14, border = TRUE, legend = "bottom") + scale_fill_tableau() + xlab("Date") + ylab("SWP - Baseline (Bars)")
+
+```
+
+##Roop 2018
+```{r}
+ggplot(swp_roop_2018, aes(x = as.factor(Date), y = SWP, fill = Treatment)) + geom_boxplot() + theme_pubr(base_family = "serif", base_size = 14, border = TRUE, legend = "bottom") + scale_fill_tableau() + xlab("Date") + ylab("Stem Water Potential (Bars)")
+
+ggplot(swp_roop_2018, aes(x = as.factor(Date), y = SWP_BL, fill = Treatment)) + geom_boxplot() + theme_pubr(base_family = "serif", base_size = 14, border = TRUE, legend = "bottom") + scale_fill_tableau() + xlab("Date") + ylab("SWP - Baseline (Bars)")
+
+```
+
+#Shapefile
+```{r}
+path_shp <- "D:/Satellite_walnut/Shapefiles"
+path_shp2 <- "D:/Satellite_walnut/CITRIS_sitelocations/Shapefiles"
+#
+roop_trees <- shapefile(file.path(path_shp, "MAP2_points_UTM10N.shp"))
+plot(roop_trees)
+
+#Extra grower practice
+extra_growprac <- shapefile(file.path(path_shp, "Extra_Grower_Practice.shp"))
+#extra_growprac <- spTransform(extra_growprac, crs(roop_trees))
+#shapefile(extra_growprac, file.path(path_shp, "Extra_Grower_Practice.shp"))
+plot(extra_growprac, add=  TRUE)
+
+#boundary
+
+roop_trees_sb <- shapefile(file.path(path_shp, "MAP2_points_UTM10N_subset.shp"))
+plot(roop_trees_sb)
+plot(roop_trees)
+```
+
+
+#AVIRIS data
+```{r}
+path_aviris <- "D:/Satellite_walnut/AVIRIS"
+list.files(path_aviris)
+aviris_061218_rot <- raster::brick(file.path(path_aviris, "AVIRIS_20180612.dat"))
+aviris_061218 <- raster::brick(file.path(path_aviris, "AVIRIS_20180612_rotateback.dat"))
+wavelen_aviris <- unlist(rm_between(names(aviris_061218_rot),"...",".",extract=TRUE))
+names(aviris_061218_rot) <- wavelen_aviris
+aviris_061218_rot <- aviris_061218_rot/10000
+plot(aviris_061218_rot)
+plot(aviris_061218)
+
+a <- raster::rotate(aviris_061218_rot)
+```
+##Extraction 
+```{r}
+ref_aviris <- raster::extract(aviris_061218, roop_trees_sb, df = TRUE)
+head(ref_aviris)
+
+
+```
+
